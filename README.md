@@ -193,8 +193,16 @@ pg_net. The functions integrate with Meta and the QR service. The front end read
 - **`xlsx` 0.18.5 from npm has known vulnerabilities** (CVE-2023-30533, CVE-2024-22363); fixed releases are published only on the SheetJS CDN. The library only
   parses spreadsheets that a signed-in user uploads to the broadcast importer, and writes the example sheet and the report exports. If that risk matters,
   replace it with the SheetJS CDN build.
-- **`npm audit` reports vulnerabilities** in development dependencies (the Vitest UI server, `tar`, `tinypool`, never run in production) and in `zod` 3.x
-  and `yaml`. Review it before you expose an installation.
+- **`npm audit` still reports vulnerabilities, and the reason differs per package.** At the root (the app) it reports 9 packages (4 with `--omit=dev`). In
+  production code: `xlsx` (above); `zod` 3.x, whose unbounded error accumulation when an array fails validation (measured: 200,001 issues for one
+  200,000-element array) is fixed only in Zod 4, and the app uses zod to validate responses from its own backend (realtime, RPC, QR service), so the worst case
+  is the user's own browser tab; and `react-router` 6 (fixed only in 7.18; the app is a single-page app and builds only internal paths). The rest is
+  development tooling that never runs in production (`vite`, `vitest`, `tinypool`, `esbuild`). The edge functions import `zod` 3.23.8 from the Deno
+  side, outside `npm audit`, and validate external input with it. In the QR service it reports 4 packages (the same 4 with `--omit=dev`): `link-preview-js`
+  has no fix inside the version range Baileys accepts, and `baileys` is listed only because it depends on it; `music-metadata` has a fix inside its range
+  (11.16.0) but is a direct dependency of Baileys; `sharp` has a fix only in 0.35 and is also used by Baileys for thumbnails and profile pictures. None of the
+  three was changed on purpose, because changing a library that Baileys loads changes how a number behaves. Everything else with a published fix was
+  updated (see the CHANGELOG). Review the output before you expose an installation.
 
 ## Alternative: Supabase Cloud or the Supabase CLI, plus a static host
 

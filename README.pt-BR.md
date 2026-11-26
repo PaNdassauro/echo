@@ -194,8 +194,16 @@ pg_net. As funções integram com a Meta e com o serviço de QR. O front lê pel
 - **O `xlsx` 0.18.5 do npm tem vulnerabilidades conhecidas** (CVE-2023-30533, CVE-2024-22363); as versões corrigidas só saem pela CDN da SheetJS. A biblioteca só
   lê planilhas que um usuário logado envia ao importador de disparos, e grava a planilha de exemplo e as exportações de relatório. Se esse risco importa,
   troque pela versão da CDN da SheetJS.
-- **O `npm audit` aponta vulnerabilidades** em dependências de desenvolvimento (servidor da UI do Vitest, `tar`, `tinypool`, que nunca rodam em produção) e no `zod` 3.x
-  e no `yaml`. Revise antes de expor uma instalação.
+- **O `npm audit` ainda aponta vulnerabilidades, e o motivo muda por pacote.** Na raiz (o app) são 9 pacotes (4 com `--omit=dev`). No código de produção: `xlsx`
+  (acima); `zod` 3.x, cujo acúmulo de erros sem teto quando um array falha na validação (medido: 200.001 erros para um array de 200.000 elementos) só foi
+  corrigido no Zod 4, e o app usa o zod para validar respostas do próprio backend (realtime, RPC, serviço de QR), então o pior caso é a aba do próprio
+  usuário; e `react-router` 6 (corrigido só na 7.18; o app é uma aplicação de página única e só monta caminhos internos). O resto é ferramenta de
+  desenvolvimento que nunca roda em produção (`vite`, `vitest`, `tinypool`, `esbuild`). As edge functions importam o `zod` 3.23.8 pelo lado do Deno, fora do
+  `npm audit`, e validam entrada externa com ele. No serviço de QR são 4 pacotes (os mesmos 4 com `--omit=dev`): o `link-preview-js` não tem correção dentro
+  da faixa que o Baileys aceita, e o `baileys` só aparece na lista por depender dele; o `music-metadata` tem correção dentro da faixa (11.16.0), mas é
+  dependência direta do Baileys; o `sharp` só tem correção na 0.35 e também é usado pelo Baileys nas miniaturas e na foto de perfil. Nenhum dos três foi
+  mexido de propósito, porque trocar uma biblioteca que o Baileys carrega muda o comportamento de um número. Tudo o mais que tinha correção publicada foi
+  atualizado (veja o CHANGELOG). Revise a saída antes de expor uma instalação.
 
 ## Alternativa: Supabase Cloud ou a CLI do Supabase, mais um host estático
 

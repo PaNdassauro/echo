@@ -134,8 +134,11 @@ the gateway. **Supabase Cloud setup:** the list below.
   libraries process untrusted data from WhatsApp in the QR service process.
 - **`xlsx` 0.18.5** has known vulnerabilities (CVE-2023-30533, CVE-2024-22363). It only parses spreadsheets uploaded
   by signed-in users. See the README for why it was kept.
-- **`npm audit` reports vulnerabilities** in development dependencies (Vitest UI server, `tar`, `tinypool`) and in
-  `zod` 3.x and `yaml`. See the README (Known limitations). Do not run the Vitest UI server on a public host.
+- **`npm audit` still reports vulnerabilities**: `xlsx`, `zod` 3.x (fixed only in Zod 4; the app uses it on responses from its own backend) and
+  `react-router` 6 in the app, development tooling (`vite`, `vitest`, `tinypool`, `esbuild`), and in the QR service `link-preview-js` (no fix inside the
+  range Baileys accepts; `baileys` is listed only because it depends on it), `music-metadata` (a fix exists inside its range, but it is a direct dependency
+  of Baileys) and `sharp` (fixed only in 0.35, also used by Baileys). The Baileys-related ones were left unchanged on purpose. See the README (Known
+  limitations). Do not run `npm run dev` or the Vitest UI server on a public host.
 - Logs of the edge functions can contain message text. Restrict access to your Supabase project logs, or to `./echo logs`
   and the Docker logs of the host, accordingly. Redact keys and customer phone numbers before pasting a log anywhere.
 - The Docker installation inherits the limitations above and adds: one node and no high availability, and the address

@@ -8,7 +8,19 @@ and the QR service, in `qr-service/package.json`. Each entry is named after the 
 
 ## [Unreleased]
 
-Nothing yet. At a release the title of this section becomes `[X.Y.Z] - <date>`, together with the version in `package.json` (the
+### Security: dependency updates
+
+- QR service: `multer` 2.0.2 to 2.5.0, `express` 4.22.1 to 4.22.3 (with `body-parser` 1.20.9, `path-to-regexp` 0.1.13, `qs` 6.16.2),
+  `proxy-addr` 2.0.8; `tsx` 4.23.15 (development). `npm audit` went from 10 to 4 packages.
+  One measured difference: a file of exactly 50 MiB is now accepted by the upload middleware (it was refused).
+- App: `npm audit fix` without `--force` and three `overrides` (`postcss-selector-parser`, `glob`, `tar`). In the front-end bundle,
+  `lodash` 4.17.23 to 4.18.1 and `react-router`/`react-router-dom` 6.30.3 to 6.30.6; also `vitest` 3.2.7, `vite-plugin-pwa` 1.3.0,
+  `workbox-build` 7.4.1. `npm audit` went from 39 to 9 packages (17 to 4 with `--omit=dev`).
+- Not changed: the WhatsApp libraries (Baileys, zapo) and the packages they load or declare as dependencies or peers (`link-preview-js`,
+  `music-metadata`, `sharp`: the QR service packages that keep open alerts), `xlsx`, `zod` 3.x, and the major versions of
+  React, Vite, Tailwind, ESLint, react-router, Express and TypeScript. What remains is listed in the README, "Known limitations".
+
+At a release the title of this section becomes `[X.Y.Z] - <date>`, together with the version in `package.json` (the
 `./echo upgrade` command prints the section whose title carries the version it just installed).
 
 ## [2.13.0] - 2026-11-26
