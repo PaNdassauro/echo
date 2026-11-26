@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem
+    url: https://github.com/PaNdassauro/echo/security/advisories/new
+    about: Do not open a public issue for a vulnerability. Use GitHub's private vulnerability reporting (see SECURITY.md).
+  - name: Troubleshooting guide
+    url: https://github.com/PaNdassauro/echo/blob/main/docs/troubleshooting.md
+    about: The errors seen during the tests of the Docker installation, with the cause and what to do. Start with ./echo doctor.

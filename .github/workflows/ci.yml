@@ -1,0 +1,210 @@
+name: CI
+
+# Portão de qualidade de PR e das branches dev/main. Quatro trilhos independentes:
+#
+#   web        - front Vite/React: typecheck, vitest, build de produção e lint. O build não depende de nenhuma
+#                variável VITE_*: o front lê o /config.js em tempo de execução.
+#   edge       - edge functions e o runtime de processo único (Deno 2.5.6): `deno check` nas 46 funções, no roteador
+#                e no echo-admin, a suíte Deno, os testes do roteador e a conferência do verify_jwt. Essa suíte NÃO
+#                é vitest; `npm test` nunca a executa, por isso o job separado.
+#   qr-service - serviço de QR (pasta qr-service/, projeto npm próprio): build (tsc) e `npm run test:all`. Não tem
+#                relação com o `npm ci` da raiz.
+#   selfhost   - a instalação com Docker: shellcheck, o compose, os testes de infraestrutura e a fumaça ponta a ponta
+#                (`scripts/smoke-selfhost.sh`, projeto echo-smoke). Só roda em push para main e em PR que mexe no
+#                stack (ver o passo "Escopo"): o GitHub não filtra por caminho dentro de um job, então o filtro é
+#                feito aqui e o job termina verde e rápido quando nada do stack mudou.
+#
+# Nada aqui publica imagem, faz deploy ou usa segredo (`secrets.*`): as imagens do Echo são construídas na máquina de
+# quem instala, e o único artefato é o log do stack de teste quando a fumaça falha.
+#
+# O lint roda mas não bloqueia (continue-on-error): a base tem 484 erros e 78 avisos herdados (medido na
+# integração com `npm run lint`, teto 488), quase todos `no-explicit-any`. Quando o baseline for zerado, remova o
+# continue-on-error para o lint virar portão de verdade.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Front (typecheck · test · build · lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Vitest
+        run: npm test
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Lint (não bloqueante até zerar o baseline)
+        continue-on-error: true
+        run: npm run lint
+
+  edge:
+    name: Edge functions (deno check · testes Deno · roteador)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      # O 1º `deno check`/`deno test` baixa dependências (esm.sh, npm:typescript, npm:nodemailer): precisa de rede.
+      - name: deno check (46 funções, roteador e echo-admin)
+        run: npm run check:edge
+
+      - name: Testes Deno (inclui o varredor de processo único)
+        run: npm run test:edge
+
+      - name: Testes do roteador
+        run: npm run test:router
+
+      - name: verify_jwt de cada função confere com o config.toml
+        run: npm run check:verify-jwt
+
+  qr-service:
+    name: Serviço de QR (build · testes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: qr-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: qr-service/package-lock.json
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Testes
+        run: npm run -s test:all
+
+  selfhost:
+    name: Instalação Docker (shellcheck · compose · infra · fumaça)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Escopo (a instalação mudou?)
+        id: escopo
+        env:
+          EVENTO: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          rodar=false
+          if [ "$EVENTO" = "push" ]; then
+            # Só o push para main roda a fumaça de 60 min; push para dev roda os outros jobs e este termina verde.
+            if [ "$REF" = "refs/heads/main" ]; then
+              rodar=true
+            fi
+          elif [ "$EVENTO" = "pull_request" ]; then
+            lista=$(git diff --name-only "$BASE_SHA" HEAD)
+            if printf '%s\n' "$lista" | grep -Eq '^(docker/|docker-compose\.yml$|install\.sh$|echo$|supabase/|qr-service/|src/|public/|index\.html$|vite\.config\.ts$|package(-lock)?\.json$|scripts/smoke|\.github/workflows/ci\.yml$)'; then
+              rodar=true
+            fi
+          fi
+          echo "rodar=$rodar" >> "$GITHUB_OUTPUT"
+          echo "Instalação Docker entra na verificação: $rodar"
+
+      - uses: actions/setup-node@v4
+        if: steps.escopo.outputs.rodar == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci
+        if: steps.escopo.outputs.rodar == 'true'
+        run: npm ci
+
+      # A versão do shellcheck é a medida (0.10.0), a mesma em qualquer runner.
+      - name: shellcheck
+        if: steps.escopo.outputs.rodar == 'true'
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.10.0 -S warning install.sh echo \
+            docker/db/db-init.sh docker/db/getkey.sh docker/db/preflight.sh \
+            docker/gateway/entrypoint.sh docker/migrate/migrate.sh docker/functions/echo-admin \
+            scripts/smoke-selfhost.sh scripts/smoke/lib.sh scripts/smoke/testes-infra.sh tests/sql/rodar.sh
+
+      - name: Os arquivos do compose são válidos
+        if: steps.escopo.outputs.rodar == 'true'
+        run: docker compose --env-file .env.example config -q
+
+      - name: Testes de infra (guarda de segredos, entrypoint, Caddyfile, compose)
+        if: steps.escopo.outputs.rodar == 'true'
+        run: bash scripts/smoke/testes-infra.sh
+
+      # --manter: se a fumaça falhar, o stack continua de pé e o passo seguinte guarda os logs dele. Na fumaça
+      # que passa, o passo 16 já provou que os logs do stack não têm chave nem segredo.
+      - name: Fumaça ponta a ponta (projeto echo-smoke)
+        if: steps.escopo.outputs.rodar == 'true'
+        env:
+          # A fumaça cria a pasta temporária (com o .env gerado) aqui: o caminho fica previsível para o log de falha.
+          TMPDIR: ${{ runner.temp }}
+        run: bash scripts/smoke-selfhost.sh --manter
+
+      - name: Logs do stack de teste (só se falhou)
+        if: failure() && steps.escopo.outputs.rodar == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/echo-smoke-logs"
+          for envf in "$RUNNER_TEMP"/echo-smoke.*/.env; do
+            [ -f "$envf" ] || continue
+            docker compose --env-file "$envf" -p echo-smoke logs --no-color --tail 200 \
+              > "$RUNNER_TEMP/echo-smoke-logs/stack.log" 2>&1 || true
+            docker compose --env-file "$envf" -p echo-smoke ps -a \
+              > "$RUNNER_TEMP/echo-smoke-logs/ps.txt" 2>&1 || true
+          done
+
+      - name: Anexar os logs
+        if: failure() && steps.escopo.outputs.rodar == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-smoke-logs
+          path: ${{ runner.temp }}/echo-smoke-logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Derrubar o stack de teste
+        if: always() && steps.escopo.outputs.rodar == 'true'
+        run: |
+          for envf in "$RUNNER_TEMP"/echo-smoke.*/.env; do
+            [ -f "$envf" ] || continue
+            docker compose --env-file "$envf" -p echo-smoke down -v --remove-orphans || true
+          done

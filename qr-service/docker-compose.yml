@@ -1,0 +1,76 @@
+# Echo QR service + Postgres da zapo, prontos para self-host.
+#
+#   cp .env.example .env     # preencha SUPABASE_URL, SUPABASE_SERVICE_KEY, WEBHOOK_URL, QR_WEBHOOK_SECRET e ZAPO_PG_PASSWORD
+#   docker compose up -d --build
+#   curl -s localhost:${QR_PORT:-3000}/health
+#
+# O Postgres da zapo é interno ao compose (volume próprio) e a senha dele vem de
+# ZAPO_PG_PASSWORD (sem padrão: gere com `openssl rand -hex 24`); as sessões do
+# Baileys ficam no volume qr_sessions. Para ligação de voz, troque o dockerfile por Dockerfile.voip.
+services:
+  echo-qr-service:
+    # Nome fixo da imagem: sem ele o Compose a chama de `<pasta>-<serviço>` (qr-service-echo-qr-service).
+    image: echo-qr-service
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-local}
+    container_name: echo-qr-service
+    restart: unless-stopped
+    # Todas as variáveis opcionais do .env chegam ao container; as de `environment` abaixo têm precedência.
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${QR_PORT:-3000}:3000"
+    # Permite apontar SUPABASE_URL/WEBHOOK_URL para um Supabase local no host (http://host.docker.internal:54321),
+    # que no Linux não resolve sem isto.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORT: "3000"
+      SUPABASE_URL: ${SUPABASE_URL:?defina SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:?defina SUPABASE_SERVICE_KEY}
+      WEBHOOK_URL: ${WEBHOOK_URL:?defina WEBHOOK_URL}
+      QR_WEBHOOK_SECRET: ${QR_WEBHOOK_SECRET:?defina QR_WEBHOOK_SECRET}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5173}
+      # Opcional: endereço público do Echo, só quando SUPABASE_URL é um endereço interno (ver .env.example).
+      # Vazio = vale a SUPABASE_URL.
+      ECHO_PUBLIC_URL: ${ECHO_PUBLIC_URL:-}
+      MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-52428800}
+      # zapo: Postgres próprio deste compose (tabelas wa_zapo_*)
+      ZAPO_PG_URL: postgres://zapo:${ZAPO_PG_PASSWORD:?defina ZAPO_PG_PASSWORD}@zapo-db:5432/zapo
+      ZAPO_PG_TABLE_PREFIX: wa_zapo_
+    # A imagem roda como `node` (uid 1000). Volume `qr_sessions` criado por uma imagem antiga, que rodava
+    # como root, precisa de um `chown -R 1000:1000` único (README, "Session persistence").
+    volumes:
+      - qr_sessions:/app/sessions
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT:-3000}/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      zapo-db:
+        condition: service_healthy
+
+  zapo-db:
+    image: postgres:16-alpine
+    container_name: echo-qr-zapo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zapo
+      POSTGRES_PASSWORD: ${ZAPO_PG_PASSWORD:?defina ZAPO_PG_PASSWORD}
+      POSTGRES_DB: zapo
+    volumes:
+      - zapo_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zapo -d zapo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  qr_sessions:
+  zapo_pg:

@@ -1,0 +1,1130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 200 15% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 200 15% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 200 15% 20%;
+
+    /* L 31%: primeiro degrau em que texto branco passa 4,5:1 (antes 43% = 2,5:1,
+       e o runtime subia pra 55% = 1,8:1 — todo botão primário reprovado) */
+    --primary: 176 66% 31%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 174 20% 96%;
+    --secondary-foreground: 200 15% 20%;
+
+    --muted: 174 15% 96%;
+    --muted-foreground: 200 10% 38%;
+
+    --accent: 176 66% 31%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 39%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Tokens semânticos de status — usáveis como TEXTO: ≥4,5:1 sobre o card e sobre
+       o próprio fundo em /10–/15 (selos), medido em todos os presets */
+    --success: 142 72% 25%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 28%;
+    --warning-foreground: 0 0% 100%;
+    --info: 217 91% 45%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 174 15% 90%;
+    --input: 174 15% 90%;
+    --ring: 174 60% 40%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 174 20% 98%;
+    --sidebar-foreground: 200 15% 20%;
+    --sidebar-primary: 174 60% 32%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 174 15% 96%;
+    --sidebar-accent-foreground: 200 15% 20%;
+    --sidebar-border: 174 15% 90%;
+    --sidebar-ring: 174 60% 40%;
+
+    --chat-bubble-user: 174 60% 32%;
+    --chat-bubble-user-foreground: 0 0% 100%;
+    --chat-bubble-contact: 0 0% 96%;
+    --chat-bubble-contact-foreground: 200 15% 20%;
+
+    /* Cor por remetente em grupo (paridade WhatsApp). Hues fixos entre temas —
+       os presets herdam; só light/dark ajustam a luminosidade para contraste
+       sobre --chat-bubble-contact. Índice via senderColorIndex (FNV-1a). */
+    --group-sender-1: 350 70% 45%;
+    --group-sender-2: 25 75% 40%;
+    --group-sender-3: 150 55% 32%;
+    --group-sender-4: 205 75% 38%;
+    --group-sender-5: 260 60% 50%;
+    --group-sender-6: 320 60% 44%;
+    --group-sender-7: 42 75% 34%;
+    --group-sender-8: 182 55% 32%;
+
+    --status-active: 142 76% 36%;
+    --status-pending: 45 93% 47%;
+    --status-closed: 0 0% 60%;
+
+    /* Chart series (analytics). Par padrão Echo: azul / verde. */
+    --chart-1: 221 83% 53%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 32 95% 55%;
+    --chart-4: 265 80% 65%;
+    --chart-5: 190 80% 45%;
+
+    /* Desfecho de atendimento (painel de atendimentos). Status fixo: não segue o
+       preset de tema. "Resolvido" é uma família verde — escuro = mesmo dia, claro =
+       outro dia — para separar por luminosidade e não só por matiz (daltonismo).
+       Validado com o validate_palette do guia de dataviz em claro e escuro. */
+    --outcome-same-day: #157f3c;
+    --outcome-other-day: #73cc92;
+    --outcome-open: #57646b;
+    --outcome-unanswered: #ef4343;
+
+    /* Emil-style easing — stronger than MD3's 0.4, 0, 0.2, 1 */
+    --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .dark {
+    --background: 200 20% 8%;
+    --foreground: 174 15% 96%;
+
+    --card: 200 15% 10%;
+    --card-foreground: 174 15% 96%;
+
+    --popover: 200 15% 10%;
+    --popover-foreground: 174 15% 96%;
+
+    /* Escuro: primary fica CLARO e o foreground escurece (texto branco sobre
+       teal 48% dava 2,2:1 no botão; teal 32% como TEXTO dava 3,4-4,0:1 nos
+       111 text-primary — claro+fg escuro resolve os dois lados: 8,5:1) */
+    --primary: 176 60% 48%;
+    --primary-foreground: 200 20% 8%;
+
+    --secondary: 200 15% 14%;
+    --secondary-foreground: 174 15% 96%;
+
+    --muted: 200 15% 14%;
+    --muted-foreground: 174 10% 60%;
+
+    --accent: 176 60% 48%;
+    --accent-foreground: 200 20% 8%;
+
+    --destructive: 0 84% 77%;
+    --destructive-foreground: 200 20% 8%;
+
+    /* Tons claros para fundo escuro (texto/ícone direto no bg) */
+    --success: 142 65% 55%;
+    --success-foreground: 200 20% 8%;
+    --warning: 43 96% 56%;
+    --warning-foreground: 26 83% 14%;
+    --info: 213 90% 65%;
+    --info-foreground: 200 20% 8%;
+
+    --border: 200 15% 18%;
+    --input: 200 15% 18%;
+    --ring: 174 55% 45%;
+
+    --sidebar-background: 200 18% 10%;
+    --sidebar-foreground: 174 15% 96%;
+    --sidebar-primary: 174 55% 45%;
+    --sidebar-primary-foreground: 200 20% 8%;
+    --sidebar-accent: 200 15% 14%;
+    --sidebar-accent-foreground: 174 15% 96%;
+    --sidebar-border: 200 15% 18%;
+    --sidebar-ring: 174 55% 45%;
+
+    --chat-bubble-user: 174 55% 32%;
+    --chat-bubble-user-foreground: 0 0% 100%;
+    --chat-bubble-contact: 200 15% 14%;
+    --chat-bubble-contact-foreground: 174 15% 96%;
+
+    /* Cor por remetente em grupo — mesmos hues do light, mais claros p/ fundo escuro */
+    --group-sender-1: 350 85% 72%;
+    --group-sender-2: 25 85% 65%;
+    --group-sender-3: 150 55% 60%;
+    --group-sender-4: 205 80% 68%;
+    --group-sender-5: 260 80% 76%;
+    --group-sender-6: 320 75% 72%;
+    --group-sender-7: 42 80% 62%;
+    --group-sender-8: 182 55% 58%;
+
+    --status-active: 142 65% 50%;
+    --status-pending: 45 93% 47%;
+    --status-closed: 0 0% 60%;
+
+    /* Chart series (analytics) — tons mais claros para fundo escuro */
+    --chart-1: 213 90% 65%;
+    --chart-2: 142 65% 55%;
+    --chart-3: 32 95% 60%;
+    --chart-4: 265 85% 75%;
+    --chart-5: 190 80% 55%;
+
+    --outcome-same-day: #42d778;
+    --outcome-other-day: #317a4b;
+    --outcome-open: #8fa3a1;
+    --outcome-unanswered: #ef4343;
+  }
+
+  /*
+   * Presets de tema — aplicados via data-app-theme no <html> (useLocalTheme).
+   * Vivem em CSS (não em inline style) para o script anti-flash do index.html
+   * conseguir aplicar o tema antes do primeiro paint só com o atributo.
+   * Presets escuros (midnight/dracula/nord/breu) também recebem a classe .dark, ativando
+   * os utilitários dark:* do Tailwind. Estes blocos vêm DEPOIS de :root/.dark
+   * de propósito: mesma especificidade, então a ordem decide.
+   */
+  [data-app-theme="whatsapp"] {
+    --background: 36 28% 94%;
+    --foreground: 174 42% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 174 42% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 174 42% 13%;
+    --primary: 142 70% 31%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 112 45% 94%;
+    --secondary-foreground: 174 42% 13%;
+    --muted: 36 20% 91%;
+    --muted-foreground: 174 11% 38%;
+    --accent: 142 70% 31%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 72% 25%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 28%;
+    --warning-foreground: 0 0% 100%;
+    --info: 217 91% 45%;
+    --info-foreground: 0 0% 100%;
+    --border: 36 17% 84%;
+    --input: 36 17% 84%;
+    --ring: 142 70% 42%;
+    --sidebar-background: 45 28% 97%;
+    --sidebar-foreground: 174 42% 13%;
+    --sidebar-primary: 142 70% 31%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 112 45% 94%;
+    --sidebar-accent-foreground: 174 42% 13%;
+    --sidebar-border: 36 17% 84%;
+    --sidebar-ring: 142 70% 42%;
+    --chat-bubble-user: 112 74% 91%;
+    --chat-bubble-user-foreground: 174 42% 13%;
+    --chat-bubble-contact: 0 0% 100%;
+    --chat-bubble-contact-foreground: 174 42% 13%;
+    --chart-1: 142 70% 40%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 32 95% 50%;
+    --chart-4: 265 70% 58%;
+    --chart-5: 0 72% 55%;
+  }
+
+  [data-app-theme="midnight"] {
+    --background: 200 20% 8%;
+    --foreground: 174 15% 96%;
+    --card: 200 15% 10%;
+    --card-foreground: 174 15% 96%;
+    --popover: 200 15% 10%;
+    --popover-foreground: 174 15% 96%;
+    --primary: 176 60% 48%;
+    --primary-foreground: 200 20% 8%;
+    --secondary: 200 15% 14%;
+    --secondary-foreground: 174 15% 96%;
+    --muted: 200 15% 14%;
+    --muted-foreground: 174 10% 60%;
+    --accent: 176 60% 48%;
+    --accent-foreground: 200 20% 8%;
+    --success: 142 65% 55%;
+    --success-foreground: 200 20% 8%;
+    --warning: 43 96% 56%;
+    --warning-foreground: 26 83% 14%;
+    --info: 213 90% 65%;
+    --info-foreground: 200 20% 8%;
+    --border: 200 15% 18%;
+    --input: 200 15% 18%;
+    --ring: 174 55% 45%;
+    --sidebar-background: 200 18% 10%;
+    --sidebar-foreground: 174 15% 96%;
+    --sidebar-primary: 174 55% 45%;
+    --sidebar-primary-foreground: 200 20% 8%;
+    --sidebar-accent: 200 15% 14%;
+    --sidebar-accent-foreground: 174 15% 96%;
+    --sidebar-border: 200 15% 18%;
+    --sidebar-ring: 174 55% 45%;
+    --chat-bubble-user: 174 55% 32%;
+    --chat-bubble-user-foreground: 0 0% 100%;
+    --chat-bubble-contact: 200 15% 14%;
+    --chat-bubble-contact-foreground: 174 15% 96%;
+    --status-active: 142 65% 50%;
+    --chart-1: 176 60% 55%;
+    --chart-2: 32 95% 60%;
+    --chart-3: 213 90% 65%;
+    --chart-4: 265 85% 75%;
+    --chart-5: 142 65% 55%;
+  }
+
+  [data-app-theme="dracula"] {
+    --background: 231 15% 18%;
+    --foreground: 60 30% 96%;
+    --card: 231 15% 21%;
+    --card-foreground: 60 30% 96%;
+    --popover: 231 15% 21%;
+    --popover-foreground: 60 30% 96%;
+    --primary: 265 89% 78%;
+    --primary-foreground: 231 15% 15%;
+    --secondary: 232 14% 31%;
+    --secondary-foreground: 60 30% 96%;
+    --muted: 232 14% 26%;
+    --muted-foreground: 225 27% 65%;
+    --accent: 326 100% 74%;
+    --accent-foreground: 231 15% 15%;
+    --success: 135 94% 65%;
+    --success-foreground: 231 15% 15%;
+    --warning: 65 92% 76%;
+    --warning-foreground: 231 15% 15%;
+    --info: 191 97% 77%;
+    --info-foreground: 231 15% 15%;
+    --border: 232 14% 31%;
+    --input: 232 14% 31%;
+    --ring: 265 89% 78%;
+    --sidebar-background: 231 15% 15%;
+    --sidebar-foreground: 60 30% 96%;
+    --sidebar-primary: 265 89% 78%;
+    --sidebar-primary-foreground: 231 15% 15%;
+    --sidebar-accent: 232 14% 26%;
+    --sidebar-accent-foreground: 60 30% 96%;
+    --sidebar-border: 232 14% 31%;
+    --sidebar-ring: 265 89% 78%;
+    --chat-bubble-user: 265 50% 42%;
+    --chat-bubble-user-foreground: 60 30% 96%;
+    --chat-bubble-contact: 232 14% 26%;
+    --chat-bubble-contact-foreground: 60 30% 96%;
+    --chart-1: 265 89% 78%;
+    --chart-2: 135 94% 65%;
+    --chart-3: 31 100% 71%;
+    --chart-4: 326 100% 74%;
+    --chart-5: 191 97% 77%;
+  }
+
+  [data-app-theme="barbie"] {
+    --background: 340 100% 97%;
+    --foreground: 330 60% 25%;
+    --card: 0 0% 100%;
+    --card-foreground: 330 60% 25%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 330 60% 25%;
+    --primary: 327 81% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 330 80% 94%;
+    --secondary-foreground: 330 60% 25%;
+    --muted: 330 50% 94%;
+    --muted-foreground: 330 30% 45%;
+    --accent: 327 81% 48%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 72% 25%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 28%;
+    --warning-foreground: 0 0% 100%;
+    --info: 217 91% 45%;
+    --info-foreground: 0 0% 100%;
+    --border: 330 60% 88%;
+    --input: 330 60% 88%;
+    --ring: 327 81% 48%;
+    --sidebar-background: 330 100% 98%;
+    --sidebar-foreground: 330 60% 25%;
+    --sidebar-primary: 327 81% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 330 80% 94%;
+    --sidebar-accent-foreground: 330 60% 25%;
+    --sidebar-border: 330 60% 88%;
+    --sidebar-ring: 327 81% 48%;
+    --chat-bubble-user: 327 81% 48%;
+    --chat-bubble-user-foreground: 0 0% 100%;
+    --chat-bubble-contact: 0 0% 100%;
+    --chat-bubble-contact-foreground: 330 60% 25%;
+    --chart-1: 327 81% 55%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 32 95% 55%;
+    --chart-4: 265 70% 60%;
+    --chart-5: 142 65% 45%;
+  }
+
+  [data-app-theme="lavanda"] {
+    --background: 252 45% 96%;
+    --foreground: 262 38% 20%;
+    --card: 0 0% 100%;
+    --card-foreground: 262 38% 20%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 262 38% 20%;
+    --primary: 262 48% 47%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 258 60% 93%;
+    --secondary-foreground: 262 38% 20%;
+    --muted: 254 32% 92%;
+    --muted-foreground: 260 14% 39%;
+    --accent: 262 48% 47%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 352 72% 39%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 72% 25%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 28%;
+    --warning-foreground: 0 0% 100%;
+    --info: 222 80% 45%;
+    --info-foreground: 0 0% 100%;
+    --border: 254 30% 87%;
+    --input: 254 30% 87%;
+    --ring: 262 55% 58%;
+    --sidebar-background: 255 50% 98.5%;
+    --sidebar-foreground: 262 38% 20%;
+    --sidebar-primary: 262 48% 47%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 258 60% 93%;
+    --sidebar-accent-foreground: 262 38% 20%;
+    --sidebar-border: 254 30% 87%;
+    --sidebar-ring: 262 55% 58%;
+    --chat-bubble-user: 258 64% 89%;
+    --chat-bubble-user-foreground: 262 38% 20%;
+    --chat-bubble-contact: 0 0% 100%;
+    --chat-bubble-contact-foreground: 262 38% 20%;
+    --status-active: 142 76% 36%;
+    --chart-1: 262 55% 55%;
+    --chart-2: 199 80% 45%;
+    --chart-3: 330 62% 58%;
+    --chart-4: 168 55% 40%;
+    --chart-5: 36 90% 52%;
+    --group-sender-7: 42 75% 32%;
+  }
+
+  [data-app-theme="nord"] {
+    --background: 220 16% 22%;
+    --foreground: 218 27% 94%;
+    --card: 222 16% 26%;
+    --card-foreground: 218 27% 94%;
+    --popover: 222 16% 26%;
+    --popover-foreground: 218 27% 94%;
+    --primary: 193 43% 67%;
+    --primary-foreground: 220 16% 18%;
+    --secondary: 220 17% 32%;
+    --secondary-foreground: 218 27% 94%;
+    --muted: 222 16% 30%;
+    --muted-foreground: 219 22% 76%;
+    --accent: 210 34% 63%;
+    --accent-foreground: 220 16% 18%;
+    --destructive: 354 48% 83%;
+    --destructive-foreground: 220 16% 18%;
+    --success: 92 35% 74%;
+    --success-foreground: 220 16% 18%;
+    --warning: 40 71% 73%;
+    --warning-foreground: 220 16% 18%;
+    --info: 193 43% 67%;
+    --info-foreground: 220 16% 18%;
+    --border: 220 16% 36%;
+    --input: 220 16% 36%;
+    --ring: 193 43% 67%;
+    --sidebar-background: 220 17% 18%;
+    --sidebar-foreground: 218 27% 94%;
+    --sidebar-primary: 193 43% 67%;
+    --sidebar-primary-foreground: 220 16% 18%;
+    --sidebar-accent: 222 16% 28%;
+    --sidebar-accent-foreground: 218 27% 94%;
+    --sidebar-border: 220 16% 28%;
+    --sidebar-ring: 193 43% 67%;
+    --chat-bubble-user: 213 32% 40%;
+    --chat-bubble-user-foreground: 218 27% 94%;
+    --chat-bubble-contact: 222 16% 28%;
+    --chat-bubble-contact-foreground: 218 27% 94%;
+    --status-active: 92 28% 65%;
+    --chart-1: 193 43% 67%;
+    --chart-2: 92 28% 65%;
+    --chart-3: 40 71% 73%;
+    --chart-4: 311 20% 63%;
+    --chart-5: 14 51% 63%;
+    --group-sender-1: 350 85% 80%;
+    --group-sender-2: 25 85% 72%;
+    --group-sender-3: 150 55% 64%;
+    --group-sender-4: 205 80% 74%;
+    --group-sender-5: 260 80% 82%;
+    --group-sender-6: 320 75% 79%;
+    --group-sender-7: 42 80% 64%;
+    --group-sender-8: 182 55% 62%;
+  }
+
+  [data-app-theme="breu"] {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 38 92% 58%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 11%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 38 92% 58%;
+    --accent-foreground: 0 0% 4%;
+    --destructive: 0 84% 72%;
+    --destructive-foreground: 0 0% 4%;
+    --success: 142 65% 55%;
+    --success-foreground: 0 0% 4%;
+    --warning: 48 96% 60%;
+    --warning-foreground: 26 83% 10%;
+    --info: 213 90% 68%;
+    --info-foreground: 0 0% 4%;
+    --border: 0 0% 17%;
+    --input: 0 0% 17%;
+    --ring: 38 92% 50%;
+    --sidebar-background: 0 0% 5%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 38 92% 58%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 11%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 0 0% 15%;
+    --sidebar-ring: 38 92% 50%;
+    --chat-bubble-user: 36 70% 26%;
+    --chat-bubble-user-foreground: 40 30% 96%;
+    --chat-bubble-contact: 0 0% 12%;
+    --chat-bubble-contact-foreground: 0 0% 95%;
+    --status-active: 142 65% 50%;
+    --chart-1: 38 92% 58%;
+    --chart-2: 213 90% 65%;
+    --chart-3: 142 65% 55%;
+    --chart-4: 265 85% 75%;
+    --chart-5: 350 85% 68%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    /* antialiased uma vez na raiz: no macOS/iOS o texto renderia mais pesado
+       que o desenhado. Nunca por componente. */
+    @apply bg-background text-foreground antialiased;
+  }
+
+  /* Prevent pull-to-refresh on mobile */
+  html {
+    overscroll-behavior: none;
+  }
+}
+
+/* Mobile utilities */
+@layer utilities {
+  .theme-chat-wallpaper {
+    background-color: hsl(36 28% 91%);
+  }
+
+  /* Scrollbars e controles nativos escuros nos temas de fundo escuro */
+  [data-app-theme="midnight"],
+  [data-app-theme="dracula"],
+  [data-app-theme="nord"],
+  [data-app-theme="breu"] {
+    color-scheme: dark;
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-surface {
+    background: hsl(42 24% 96%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-header {
+    background: hsl(174 86% 20%);
+    color: hsl(0 0% 100%);
+    border-color: hsl(174 62% 16%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-header .text-muted-foreground {
+    color: hsl(0 0% 100% / 0.72);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-top-button,
+  [data-app-theme="whatsapp"] .theme-sidebar-header [data-sidebar-top-button="true"] {
+    color: hsl(0 0% 100% / 0.82);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-top-button:hover,
+  [data-app-theme="whatsapp"] .theme-sidebar-header [data-sidebar-top-button="true"]:hover {
+    background: hsl(0 0% 100% / 0.12);
+    color: hsl(0 0% 100%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-action-button {
+    background: hsl(0 0% 100%);
+    color: hsl(174 62% 22%);
+    border-color: hsl(36 17% 84%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-action-button:hover {
+    background: hsl(112 45% 94%);
+    color: hsl(174 70% 18%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-action-button svg {
+    color: currentColor;
+  }
+
+  [data-app-theme="whatsapp"] .theme-sidebar-action-button .text-muted-foreground {
+    color: currentColor;
+  }
+
+  [data-app-theme="whatsapp"] .theme-echo-logo {
+    width: 88px;
+    background: #25d366;
+    -webkit-mask: url("/echo-logo.png") center / contain no-repeat;
+    mask: url("/echo-logo.png") center / contain no-repeat;
+  }
+
+  [data-app-theme="whatsapp"] .theme-echo-logo-img {
+    opacity: 0;
+  }
+
+  /* Símbolo da coluna estreita: mesmo truque de máscara do logo acima. */
+  [data-app-theme="whatsapp"] .theme-echo-icon {
+    background: #25d366;
+    -webkit-mask: url("/echo-icon.png") center / contain no-repeat;
+    mask: url("/echo-icon.png") center / contain no-repeat;
+  }
+
+  [data-app-theme="whatsapp"] .theme-echo-icon-img {
+    opacity: 0;
+  }
+
+  [data-app-theme="whatsapp"] .theme-phone-selector-trigger {
+    background: hsl(174 70% 24%);
+    color: hsl(0 0% 100%);
+    border-color: hsl(174 55% 18%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-phone-selector-empty {
+    background: hsl(174 70% 24%);
+    color: hsl(0 0% 100% / 0.82);
+    border-color: hsl(174 55% 18%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-conversation-tabs {
+    background: hsl(44 24% 94%);
+    border-color: hsl(36 17% 84%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-conversation-row {
+    background: hsl(42 24% 98%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-conversation-row:hover {
+    background: hsl(112 45% 94%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-conversation-row[data-selected="true"] {
+    background: hsl(112 58% 89%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-chat-surface {
+    background-color: hsl(36 28% 91%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-chat-input {
+    background: hsl(42 24% 96%);
+    border-color: hsl(36 17% 84%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-chat-input textarea {
+    background: hsl(0 0% 100%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-chat-header {
+    background: hsl(42 24% 96%);
+    border-color: hsl(36 17% 84%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-chat-header .bg-muted {
+    background: hsl(112 45% 94%);
+  }
+
+  [data-app-theme="whatsapp"] .theme-empty-chat {
+    background-color: hsl(36 28% 91%);
+  }
+
+  /* Imagem de fundo do tema personalizado: as variáveis vêm de src/lib/wallpaperApply.ts
+     (blob URL do IndexedDB). Sem imagem, nenhuma variável e nada muda. Só dentro da
+     conversa: na tela "Selecione uma conversa" o texto some sobre a foto. */
+  [data-app-theme="custom"] .theme-chat-surface {
+    background-image: var(--custom-wallpaper-image, none);
+    background-size: var(--custom-wallpaper-size, cover);
+    background-repeat: var(--custom-wallpaper-repeat, no-repeat);
+    background-position: var(--custom-wallpaper-position, center);
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-left {
+    padding-left: env(safe-area-inset-left);
+  }
+
+  .safe-area-right {
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .safe-area-x {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .safe-area-y {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-inset {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  /* Reserva exata da BottomNavigation (h-16 + safe-area) — fonte única de verdade */
+  .pb-bottom-nav {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+
+  /* Touch handling */
+  .touch-manipulation {
+    touch-action: manipulation;
+  }
+
+  .touch-none {
+    touch-action: none;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Momentum scrolling on iOS */
+  .scroll-momentum {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Prevent text selection on interactive elements */
+  .select-manipulation {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Full height accounting for mobile browser bars */
+  .h-dvh {
+    height: 100dvh;
+  }
+
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+
+  .max-h-dvh {
+    max-height: 100dvh;
+  }
+
+  /*
+   * Background-pulse for notification tabs.
+   * The color lives on a ::before pseudo-element and only OPACITY animates,
+   * so the pulse runs on the compositor instead of repainting every frame
+   * (this sits on the main screen and used to be an infinite paint loop).
+   * Icon/text stay 100% solid — reads as "the color is breathing".
+   * Animation only runs on INACTIVE tabs — once the user opens the tab,
+   * the active styling takes over and the pulse stops.
+   */
+  @keyframes tab-bg-pulse {
+    0%, 100% {
+      opacity: 0.28;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .tab-pulse-amber:not([data-state="active"]) {
+    --tab-pulse: 245 158 11;
+  }
+  .tab-pulse-green:not([data-state="active"]) {
+    --tab-pulse: 34 197 94;
+  }
+  .tab-pulse-blue:not([data-state="active"]) {
+    --tab-pulse: 59 130 246;
+  }
+
+  .tab-pulse-amber:not([data-state="active"]),
+  .tab-pulse-green:not([data-state="active"]),
+  .tab-pulse-blue:not([data-state="active"]) {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .tab-pulse-amber:not([data-state="active"])::before,
+  .tab-pulse-green:not([data-state="active"])::before,
+  .tab-pulse-blue:not([data-state="active"])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-color: rgb(var(--tab-pulse));
+    animation: tab-bg-pulse 2.6s ease-in-out infinite;
+  }
+
+  /* Reduced motion: keep the "something new here" signal, drop the movement.
+     Par forçado pelas preferências: :root[data-motion="reduce"] no fim do arquivo. */
+  @media (prefers-reduced-motion: reduce) {
+    .tab-pulse-amber:not([data-state="active"])::before,
+    .tab-pulse-green:not([data-state="active"])::before,
+    .tab-pulse-blue:not([data-state="active"])::before {
+      animation: none;
+      opacity: 0.18;
+    }
+  }
+}
+
+/* FlowBuilder: aresta selecionada fica "armada" (o próximo clique/Delete apaga).
+   Fora de @layer para vencer o style inline stroke do React Flow via !important. */
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: hsl(var(--destructive)) !important;
+  stroke-width: 3 !important;
+}
+
+/*
+ * Global reduced-motion fallback (outside @layer so it wins the cascade).
+ * Motion becomes near-instant; opacity/color feedback still communicates state.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Indicador de progresso é movimento ESSENCIAL (WCAG 2.3.3): sem isto os
+     spinners congelam e "carregando" fica indistinguível de "travado". */
+  .animate-spin {
+    animation-duration: 1.5s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+/*
+ * "Reduzir animações" forçado nas preferências (data-motion no <html>, ver
+ * src/lib/accessibilityPrefs.ts): o mesmo fallback acima, sem depender do
+ * pedido do sistema. Mantenha iguais os dois blocos e o par do pulso das abas
+ * (.tab-pulse-*, no @media prefers-reduced-motion dentro do @layer acima).
+ */
+:root[data-motion="reduce"],
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+:root[data-motion="reduce"] .animate-spin {
+  animation-duration: 1.5s !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* Sem isto o pulso roda uma vez em 0,01ms e o ::before volta à opacidade 1:
+   fundo sólido na cor do texto da aba. */
+:root[data-motion="reduce"] .tab-pulse-amber:not([data-state="active"])::before,
+:root[data-motion="reduce"] .tab-pulse-green:not([data-state="active"])::before,
+:root[data-motion="reduce"] .tab-pulse-blue:not([data-state="active"])::before {
+  animation: none !important;
+  opacity: 0.18;
+}
+
+/*
+ * "Alto contraste" nas preferências (data-contrast="more" no <html>, ver
+ * src/lib/accessibilityPrefs.ts). Metas, conferidas em src/lib/highContrast.test.ts
+ * nos 8 presets: texto secundário e das bolhas ≥ 7:1, borda, campo e foco ≥ 3:1.
+ *
+ * - !important de propósito: o usePhoneTheme grava --border, --muted-foreground,
+ *   --ring e --chat-bubble-user inline no <html> (preset echo), e só uma
+ *   declaração importante vence o style inline.
+ * - O echo guarda o matiz do número via --phone-theme-hue (também inline).
+ * - Ordem: genérico claro (= echo) → genérico escuro (= midnight) → um bloco por
+ *   preset. Bloco de preset redefine TODAS as chaves dos genéricos (o teste
+ *   confere), senão herda a bolha ou o foco teal do echo.
+ */
+:root[data-contrast="more"] {
+  --muted-foreground: var(--phone-theme-hue, 174) 12% 28% !important;
+  --border: var(--phone-theme-hue, 174) 15% 46% !important;
+  --input: var(--phone-theme-hue, 174) 15% 46% !important;
+  --sidebar-border: var(--phone-theme-hue, 174) 15% 46% !important;
+  --ring: var(--phone-theme-hue, 174) 60% 30% !important;
+  --sidebar-ring: var(--phone-theme-hue, 174) 60% 30% !important;
+  --chat-bubble-user: var(--phone-theme-hue, 174) 60% 22% !important;
+}
+
+:root.dark[data-contrast="more"] {
+  --muted-foreground: 174 10% 70% !important;
+  --border: 200 12% 46% !important;
+  --input: 200 12% 46% !important;
+  --sidebar-border: 200 12% 46% !important;
+  --ring: 174 55% 45% !important;
+  --sidebar-ring: 174 55% 45% !important;
+  --chat-bubble-user: 174 55% 23% !important;
+}
+
+:root[data-contrast="more"][data-app-theme="whatsapp"] {
+  --muted-foreground: 174 12% 26% !important;
+  --border: 36 14% 46% !important;
+  --input: 36 14% 46% !important;
+  --sidebar-border: 36 14% 46% !important;
+  --ring: 142 70% 31% !important;
+  --sidebar-ring: 142 70% 31% !important;
+  --chat-bubble-user: 112 74% 91% !important;
+}
+
+:root[data-contrast="more"][data-app-theme="dracula"] {
+  --muted-foreground: 225 30% 86% !important;
+  --border: 232 14% 60% !important;
+  --input: 232 14% 60% !important;
+  --sidebar-border: 232 14% 60% !important;
+  --ring: 265 89% 78% !important;
+  --sidebar-ring: 265 89% 78% !important;
+  --chat-bubble-user: 265 50% 42% !important;
+}
+
+:root[data-contrast="more"][data-app-theme="barbie"] {
+  --muted-foreground: 330 32% 31% !important;
+  --border: 330 45% 55% !important;
+  --input: 330 45% 55% !important;
+  --sidebar-border: 330 45% 55% !important;
+  --ring: 327 81% 48% !important;
+  --sidebar-ring: 327 81% 48% !important;
+  --chat-bubble-user: 327 81% 35% !important;
+}
+
+:root[data-contrast="more"][data-app-theme="lavanda"] {
+  --muted-foreground: 260 16% 30% !important;
+  --border: 254 22% 56% !important;
+  --input: 254 22% 56% !important;
+  --sidebar-border: 254 22% 56% !important;
+  --ring: 262 55% 58% !important;
+  --sidebar-ring: 262 55% 58% !important;
+  --chat-bubble-user: 258 64% 89% !important;
+}
+
+:root[data-contrast="more"][data-app-theme="nord"] {
+  --muted-foreground: 219 24% 90% !important;
+  --border: 220 14% 62% !important;
+  --input: 220 14% 62% !important;
+  --sidebar-border: 220 14% 62% !important;
+  --ring: 193 43% 67% !important;
+  --sidebar-ring: 193 43% 67% !important;
+  --chat-bubble-user: 213 32% 31% !important;
+}
+
+:root[data-contrast="more"][data-app-theme="breu"] {
+  --muted-foreground: 0 0% 70% !important;
+  --border: 0 0% 45% !important;
+  --input: 0 0% 45% !important;
+  --sidebar-border: 0 0% 45% !important;
+  --ring: 38 92% 50% !important;
+  --sidebar-ring: 38 92% 50% !important;
+  --chat-bubble-user: 36 70% 26% !important;
+}
+
+/* WhatsApp: cabeçalho da lista com teal fixo (ver @layer utilities). Texto
+   branco translúcido dava 4,8:1 (0.72) e 5,7:1 (0.82); sólido dá 7,6:1. O
+   seletor de número escurece para o branco passar 7:1, e as bordas fixas
+   passam a seguir o --border de contraste. */
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-sidebar-header .text-muted-foreground,
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-sidebar-top-button,
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-sidebar-header [data-sidebar-top-button="true"],
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-phone-selector-empty {
+  color: hsl(0 0% 100%);
+}
+
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-phone-selector-trigger,
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-phone-selector-empty {
+  background: hsl(174 70% 18%);
+  border-color: hsl(0 0% 100% / 0.75);
+}
+
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-sidebar-action-button,
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-conversation-tabs,
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-chat-input,
+:root[data-contrast="more"][data-app-theme="whatsapp"] .theme-chat-header {
+  border-color: hsl(var(--border));
+}
+
+/*
+ * Scrollbars do design system — finos, pill, cor por token (acompanham todos
+ * os presets claro/escuro). Chrome 121+/Firefox/Edge usam as propriedades
+ * padrão (e IGNORAM ::-webkit-scrollbar quando elas estão setadas); o bloco
+ * -webkit-* abaixo é o fallback para Safari. Detalhe invisível de propósito:
+ * o scrollbar só deve existir quando procurado.
+ */
+@layer base {
+  :root {
+    /* scrollbar-color herda — os presets trocam o tom via --muted-foreground */
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+
+  * {
+    /* scrollbar-width não herda; .scrollbar-hide (classe) continua vencendo */
+    scrollbar-width: thin;
+  }
+}
+
+/* Safari: pill de 4px "flutuando" num gutter de 12px (borda transparente +
+   background-clip), engrossando 2px no hover sem deslocar layout. */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.35);
+  border-radius: 999px;
+  border: 4px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.55);
+  border-width: 3px;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── /api-docs: cromo translúcido ───────────────────────────────────────────
+   O header flutua sobre o conteúdo com backdrop-blur. Quando o sistema pede
+   menos transparência, o material precisa virar sólido — não sumir. */
+@media (prefers-reduced-transparency: reduce) {
+  .api-docs-chrome {
+    background-color: hsl(var(--background));
+    backdrop-filter: none;
+  }
+}
+
+/* ── Seletor de cor (react-colorful) no editor de tema personalizado ─────── */
+.echo-color-picker.react-colorful {
+  width: 14rem; /* w-56 */
+  height: auto;
+  gap: 0.75rem;
+}
+
+.echo-color-picker .react-colorful__saturation {
+  height: 9rem;
+  border-radius: calc(var(--radius) - 2px);
+  border-bottom: 0;
+  box-shadow: inset 0 0 0 1px hsl(var(--border));
+}
+
+.echo-color-picker .react-colorful__hue {
+  height: 0.75rem;
+  border-radius: 9999px;
+}
+
+.echo-color-picker .react-colorful__saturation,
+.echo-color-picker .react-colorful__hue {
+  touch-action: none;
+}
+
+.echo-color-picker .react-colorful__pointer {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid hsl(var(--background));
+  box-shadow: 0 0 0 1px hsl(var(--border)), 0 1px 3px hsl(var(--foreground) / 0.3);
+}
+
+.echo-color-picker .react-colorful__interactive:focus .react-colorful__pointer {
+  box-shadow: 0 0 0 2px hsl(var(--ring)), 0 1px 3px hsl(var(--foreground) / 0.3);
+}
+
+/*
+ * Copiloto (faixa acima do composer, src/components/chat/copiloto/).
+ * Monocromático de propósito: só foreground/background, então vale em todos os
+ * presets. Reduced-motion (sistema ou data-motion) cai no fallback global: o
+ * shimmer para no gradiente base (texto legível) e a entrada
+ * vai direto ao estado final (fill `both`). O bichinho anima por framer-motion
+ * (CopilotoBichinho.tsx), que respeita o MotionConfig da raiz.
+ */
+@layer components {
+  /* "Lendo a conversa…": faixa clara que atravessa o texto, sem mexer no layout. */
+  .copiloto-shimmer {
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground)) 0%,
+      hsl(var(--muted-foreground)) 35%,
+      hsl(var(--foreground)) 50%,
+      hsl(var(--muted-foreground)) 65%,
+      hsl(var(--muted-foreground)) 100%
+    );
+    background-size: 250% 100%;
+    background-position: 100% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: copiloto-shimmer 1.6s linear infinite;
+  }
+  @keyframes copiloto-shimmer {
+    to {
+      background-position: -150% 0;
+    }
+  }
+
+  /* Entrada das sugestões: sobe 6px e desfoca 4px → nítido. Stagger pelo style inline. */
+  .copiloto-entra {
+    animation: copiloto-entra 220ms var(--ease-out-strong) both;
+  }
+  @keyframes copiloto-entra {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+      filter: blur(4px);
+    }
+  }
+}

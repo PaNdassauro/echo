@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues can be written in English or Portuguese. A feature in Echo applies to every organization and every number:
+        a request that only makes sense for one customer or one number is better solved as a setting that is available to all.
+  - type: textarea
+    id: problema
+    attributes:
+      label: The problem
+      description: What are you trying to do and what gets in the way today? The problem first, the solution below.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: What you would like
+      description: How it could work, on screen or in the API. Mention the alternatives you considered.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Inbox and conversations
+        - Automations and broadcasts
+        - Public API and webhooks
+        - QR service
+        - WhatsApp Cloud API or Instagram
+        - Installation, operation and upgrade (Docker)
+        - Documentation
+        - Other
+  - type: checkboxes
+    id: conferido
+    attributes:
+      label: Before you send
+      options:
+        - label: I did not include customer data, keys or the `.env`.
+          required: true

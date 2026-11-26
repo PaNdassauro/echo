@@ -1,0 +1,85 @@
+name: Bug report
+description: Something does not work as documented (Docker installation, front end, functions, QR service)
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Issues can be written in English or Portuguese.
+
+        **Do not report a security problem here.** Use the private reporting described in `SECURITY.md`.
+
+        **Never paste the `.env` file.** It holds the keys of the database and of the Vault. Before pasting any log or
+        output below, read it and remove keys, passwords, tokens and customer phone numbers or message text. `./echo doctor`
+        prints names of secrets, never values, but read its output too.
+  - type: checkboxes
+    id: conferido
+    attributes:
+      label: Before you send
+      options:
+        - label: I did not paste the `.env`, and I checked that the logs and outputs below contain no key, password, token or customer phone number.
+          required: true
+        - label: I looked at docs/troubleshooting.md and ran `./echo doctor`.
+          required: true
+  - type: dropdown
+    id: caminho
+    attributes:
+      label: How is Echo installed?
+      options:
+        - Docker, evaluation mode (./install.sh)
+        - Docker, own domain (./install.sh --domain)
+        - Docker, behind a reverse proxy (--behind-proxy)
+        - Docker, by IP address (--url)
+        - Supabase Cloud or CLI plus a static host
+        - Only developing (npm run dev)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versao
+    attributes:
+      label: Version
+      description: The "Versão" line of `./echo status`, or the tag or commit you are on (`git describe --tags --always`).
+    validations:
+      required: true
+  - type: textarea
+    id: ambiente
+    attributes:
+      label: Machine
+      description: Operating system, CPU architecture, RAM, and the output of `docker --version` and `docker compose version`. Say if it is WSL, a VM or Podman.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: o-que-aconteceu
+    attributes:
+      label: What happened
+      description: And what you expected instead. Screenshots help, as long as they show no customer data.
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ./install.sh
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `./echo doctor`
+      description: Docker installations only. Read it before pasting.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `./echo logs <service> --tail 100`
+      description: For the service that fails (db, auth, storage, realtime, migrate, rest, functions, qr, gateway). Check that there is no key, password or customer phone number before pasting.
+      render: text
+  - type: textarea
+    id: mais
+    attributes:
+      label: Anything else
+      description: What you already tried, other changes you made (for example in docker-compose.override.yml), what is in front of the gateway.

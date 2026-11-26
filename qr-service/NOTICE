@@ -1,0 +1,102 @@
+Echo QR service (the qr-service/ folder of the Echo repository, npm package echo-qr-service)
+Copyright (c) 2026 Echo contributors
+
+The source code in this folder is licensed under the MIT License of the repository
+(see ../LICENSE). The repository-wide notices are in ../NOTICE.
+
+This folder does not contain third-party source code. Third-party packages are
+declared in package.json / package-lock.json and downloaded by npm at install or
+build time. Each package keeps its own license. Most are permissive (MIT, ISC, BSD,
+Apache-2.0). The ones below have conditions you should know about before you
+redistribute a built artifact (a Docker image, a tarball with node_modules, etc.).
+This file is a summary for convenience, not legal advice.
+
+
+1. GPL-3.0: libsignal (through Baileys)
+---------------------------------------
+
+Package:  libsignal 6.0.0 (https://github.com/WhiskeySockets/libsignal-node)
+License:  GNU General Public License v3.0
+Pulled by: baileys 7.0.0-rc14 (installed as @whiskeysockets/baileys), the default
+           WhatsApp provider of this service.
+
+What it means:
+- Using this folder's source code under MIT is not affected: it only declares the
+  dependency and does not include libsignal's code.
+- A built Docker image (Dockerfile or Dockerfile.voip) or any bundle that includes
+  node_modules contains libsignal. If you distribute such an artifact to others
+  (for example, publish the image on a registry), you distribute a GPL-3.0 component
+  and must comply with the GPL-3.0 for it: provide its license text and give
+  recipients access to the corresponding source code of the GPL-covered work. Whether
+  the combined image as a whole must be offered under GPL-3.0 terms is a legal
+  question you should assess for your own case.
+- Running the service for yourself, without distributing the artifact, does not
+  trigger the GPL's distribution obligations.
+- The zapo provider (zapo-js, MIT) does not use libsignal, but the baileys package is
+  a regular dependency, so every image built from this folder includes it.
+
+
+2. LGPL-3.0-or-later: libvips (through sharp) and codec-parser
+----------------------------------------------------------------
+
+Package:  @img/sharp-libvips-<platform> 1.2.4 (prebuilt libvips binaries)
+License:  LGPL-3.0-or-later
+Pulled by: sharp 0.34.5 (Apache-2.0), used to convert images into stickers.
+           npm installs only the binary for the build platform (linuxmusl-x64
+           in the Alpine image, linux-x64 in the Debian image).
+
+Package:  codec-parser 2.5.0
+License:  LGPL-3.0-or-later
+Pulled by: audio-decode 2.2.3 (through ogg-opus-decoder, @wasm-audio-decoders/flac and
+           @wasm-audio-decoders/ogg-vorbis), used to decode outgoing voice notes
+           to compute their duration and waveform.
+
+What it means: these libraries are used unmodified and loaded as separate modules /
+shared libraries. If you redistribute an artifact that contains them, keep their
+license texts and notices, and do not prevent recipients from replacing them with a
+modified version (they are plain files in node_modules, so this holds as long as you
+do not merge them into a single opaque binary). If you modify them, the LGPL applies
+to your modifications.
+
+
+3. Packages without license metadata
+------------------------------------
+
+- zapo-js 0.3.0, installed as a nested dependency of wa-store-migrate 0.1.1 (MIT),
+  ships with no "license" field and no LICENSE file. The same project publishes later
+  versions (zapo-js 1.12.0, the direct dependency of this service) under MIT.
+- busboy 1.6.0, streamsearch 1.1.0 and querystring 0.2.0 have no "license" field in
+  package.json but include an MIT license text in the package.
+
+
+4. System packages in the Docker images
+---------------------------------------
+
+The images are based on the official node:22-alpine (Dockerfile) and
+node:22-bookworm-slim (Dockerfile.voip) images and install, from the distribution's
+package repositories:
+
+- ffmpeg: licensed under LGPL-2.1-or-later, or GPL-2.0-or-later when built with GPL
+  components, as distribution packages commonly are. Used as an external program to
+  transcode voice notes and to generate the test tone of voice calls.
+- tini: MIT.
+- ca-certificates (Dockerfile.voip only): MPL-2.0 / GPL-2.0-or-later.
+
+Their licenses are shipped inside the images by the distribution packages.
+
+The stand-alone docker-compose.yml of qr-service/ also references the image postgres:16-alpine (service
+zapo-db): PostgreSQL License for Postgres, several licenses for the Alpine packages. It is only referenced by
+name and tag, not redistributed.
+
+
+5. Native and WebAssembly components of the voice-call stack
+------------------------------------------------------------
+
+- @roamhq/wrtc 0.10.0 (BSD-2-Clause): prebuilt WebRTC binary, loaded only when
+  VOIP_ENABLED=1.
+- @zapo-js/voip 1.1.0, libmlow-wasm 0.1.1 (MIT).
+
+
+To list the license of every installed package yourself, from qr-service/:
+
+  npx license-checker --production --summary

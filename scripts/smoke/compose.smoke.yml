@@ -1,0 +1,14 @@
+# Complemento da fumaça (scripts/smoke-selfhost.sh): só acrescenta o mailpit (SMTP de teste, sem TLS) ao stack. Entra pelo
+# COMPOSE_FILE do .env temporário da fumaça (docker-compose.yml:scripts/smoke/compose.smoke.yml), então o ./echo com
+# ECHO_ENV_FILE=<tmp>/.env enxerga o mesmo stack. Nunca faz parte da instalação do usuário.
+services:
+  mailpit:
+    image: public.ecr.aws/supabase/mailpit:v1.22.3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - "127.0.0.1:${SMOKE_MAILPIT_PORT:-58292}:8025"

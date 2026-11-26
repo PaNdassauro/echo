@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "lento": true,
+  "sem-ler-corpo": true,
+  "std-serve": false,
+  "env-secret": false,
+  "lanca": false,
+  "wait-until": false
+}

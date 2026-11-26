@@ -1,0 +1,281 @@
+Echo
+Copyright (c) 2026 Echo contributors
+Licensed under the MIT License (see LICENSE).
+
+This repository includes or depends on third-party material listed below. Their licenses apply to that material,
+not the MIT License of Echo.
+
+The QR service in qr-service/ has its own notice file, qr-service/NOTICE, with the licenses of its dependencies
+(GPL-3.0 libsignal through Baileys, LGPL-3.0 components, Docker image packages). Read it before you distribute a
+built QR service image.
+
+-------------------------------------------------------------------------------------------------------------------
+1. Notification sound
+-------------------------------------------------------------------------------------------------------------------
+
+File:    public/universfield-system-notification-02-352442.mp3
+Author:  Universfield
+Source:  Pixabay (https://pixabay.com/)
+License: Pixabay Content License (https://pixabay.com/service/license-summary/)
+
+The Pixabay Content License allows using the sound inside an application, with or without attribution, but does
+not allow selling or redistributing the file on its own as a standalone file. If you need different terms, replace
+the file (the path is referenced in src/hooks/useNotificationSound.ts).
+
+-------------------------------------------------------------------------------------------------------------------
+2. Opus encoder worker
+-------------------------------------------------------------------------------------------------------------------
+
+File:    public/encoderWorker.min.js
+Origin:  opus-recorder 8.0.5 (https://github.com/chris-rudmin/opus-recorder), file dist/encoderWorker.min.js,
+         copied unchanged so the browser can load it as a Web Worker.
+License: MIT (opus-recorder), with the Opus codec (BSD) and the Speex resampler (BSD) compiled into it.
+         The full license text of opus-recorder is reproduced in Appendix A.
+
+-------------------------------------------------------------------------------------------------------------------
+3. Dependencies with licenses other than MIT/ISC/BSD/Apache-2.0
+-------------------------------------------------------------------------------------------------------------------
+
+The app (root package.json), installed from the npm registry:
+- xlsx 0.18.5 (SheetJS Community Edition): Apache-2.0. Known vulnerabilities, see README.
+- web-push 3.6.7: MPL-2.0. Loaded at runtime by the edge function send-web-push (npm: specifier), not bundled in
+  this repository.
+- axe-core: MPL-2.0. Development dependency only (accessibility lint rules), not shipped in the front end build.
+
+The QR service (qr-service/package.json), summary; the details are in qr-service/NOTICE:
+- libsignal 6.0.0: GPL-3.0, a dependency of Baileys. The source code in qr-service/ only declares the
+  dependency; a container image that includes node_modules is a combined work that includes GPL-3.0 code, and
+  whoever distributes such an image must comply with the GPL-3.0 for that component.
+- codec-parser: LGPL-3.0-or-later, through audio-decode. Used unmodified, as a separate module.
+- @img/sharp-libvips-*: LGPL-3.0-or-later, prebuilt binaries used by sharp. Used unmodified, dynamically linked.
+
+The full list of licenses of the installed packages can be produced with `npx license-checker --summary`, run at
+the root and inside qr-service/ (or by reading the "license" fields of each package-lock.json).
+
+-------------------------------------------------------------------------------------------------------------------
+4. Third-party images and packages referenced by docker-compose.yml
+-------------------------------------------------------------------------------------------------------------------
+
+The Compose file only REFERENCES these images by name and tag: Echo does not publish or redistribute them. `./install.sh` pulls them
+from their registries and builds Echo's own images on your machine. Whoever publishes an image built from this repository (for
+example to a container registry) redistributes the material below and has to comply with each license for it.
+
+Licenses below are the ones in the LICENSE file of the upstream source repository at the tag that the Compose file uses, read on
+2026-11-25. They are the license of the project; the image of a project also carries other software (operating system packages,
+Postgres extensions, libraries), each under its own license, which was NOT inventoried one by one.
+
+| Image (tag used) | Upstream project | License |
+|---|---|---|
+| public.ecr.aws/supabase/postgres:17.6.1.095 (base of the `db` image) | supabase/postgres | PostgreSQL License. The image bundles Postgres, pg_cron, pg_net, supabase_vault, pgsodium and other extensions, each under its own license (PostgreSQL, Apache-2.0, MIT and others) |
+| public.ecr.aws/supabase/gotrue:v2.198.0 | supabase/auth | MIT |
+| public.ecr.aws/supabase/storage-api:v1.98.5 | supabase/storage | Apache-2.0 |
+| public.ecr.aws/supabase/realtime:v2.174.5 | supabase/realtime | Apache-2.0 |
+| public.ecr.aws/supabase/postgrest:v14.3 | PostgREST/postgrest | MIT |
+| caddy:2.10.2-alpine (base of the `gateway` image) | caddyserver/caddy | Apache-2.0 (also the `org.opencontainers.image.licenses` label of the image) |
+| node:22.22.3-alpine3.24 (build stage of the front end and base of the QR service image) | nodejs/node, Alpine Linux | Node.js: MIT. Alpine and its packages: several licenses, see qr-service/NOTICE |
+| denoland/deno:alpine-2.5.6 (base of the `functions` image) | denoland/deno | MIT |
+| public.ecr.aws/supabase/mailpit:v1.22.3 (only in the smoke test, `scripts/smoke/compose.smoke.yml`) | axllent/mailpit | MIT |
+
+Packages the function runtime downloads at build time (pinned in docker/functions/deno.lock), besides the ones in
+supabase/functions/: nodemailer 10.3.1 (MIT-0, `npm:` specifier, loaded only when SMTP is configured) and unpdf 0.12.1 (MIT, `npm:` through
+the import map, used to read PDFs; its optional canvas dependency is downloaded with its npm dependencies but never loaded). web-push 3.6.7 is MPL-2.0, listed above. The QR service image installs ffmpeg and tini from the Alpine
+repositories (`apk add`): ffmpeg is LGPL or GPL depending on the Alpine build, see qr-service/NOTICE.
+
+-------------------------------------------------------------------------------------------------------------------
+5. ThumbHash decoder
+-------------------------------------------------------------------------------------------------------------------
+
+File:    src/lib/thumbhash.ts
+Origin:  thumbhash 0.1.1 (https://github.com/evanw/thumbhash), Evan Wallace. Only the decoding side, with type
+         annotations and lint directives added.
+License: MIT. The license text of the upstream repository is reproduced in Appendix B.
+
+-------------------------------------------------------------------------------------------------------------------
+6. UI components
+-------------------------------------------------------------------------------------------------------------------
+
+Files:   src/components/ui/*
+Origin:  generated by the shadcn/ui CLI (https://ui.shadcn.com, https://github.com/shadcn-ui/ui) and then adapted.
+License: MIT. The license text of the upstream repository is reproduced in Appendix C.
+
+-------------------------------------------------------------------------------------------------------------------
+7. Emoji data
+-------------------------------------------------------------------------------------------------------------------
+
+File:    src/components/chat/emoji/emojiCatalog.ts
+Origin:  generated from emoji-test.txt, Emoji 16.0 (https://unicode.org/Public/emoji/16.0/emoji-test.txt): the emoji
+         sequences, their grouping and their English names. The data file carries the notice "© 2024 Unicode®, Inc."
+License: Unicode License v3 (https://www.unicode.org/license.txt), reproduced in Appendix D.
+
+-------------------------------------------------------------------------------------------------------------------
+Appendix A: opus-recorder LICENSE.md (verbatim)
+-------------------------------------------------------------------------------------------------------------------
+
+## Opus Recorder License (MIT)
+
+Original Work Copyright © 2013 Matt Diamond
+
+Modified Work Copyright © 2014 Christopher Rudmin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+## Opus License (BSD)
+
+Copyright 2001-2011 Xiph.Org, Skype Limited, Octasic,
+                    Jean-Marc Valin, Timothy B. Terriberry,
+                    CSIRO, Gregory Maxwell, Mark Borgerding,
+                    Erik de Castro Lopo
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+- Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+- Neither the name of Internet Society, IETF or IETF Trust, nor the
+names of specific contributors, may be used to endorse or promote
+products derived from this software without specific prior written
+permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
+OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Opus is subject to the royalty-free patent licenses which are
+specified at:
+
+Xiph.Org Foundation:
+https://datatracker.ietf.org/ipr/1524/
+
+Microsoft Corporation:
+https://datatracker.ietf.org/ipr/1914/
+
+Broadcom Corporation:
+https://datatracker.ietf.org/ipr/1526/
+
+
+## Speex License (BSD)
+
+© 2002-2003, Jean-Marc Valin/Xiph.Org Foundation
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+- Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+- Neither the name of the Xiph.org Foundation nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+-------------------------------------------------------------------------------------------------------------------
+Appendix B: thumbhash LICENSE.md (verbatim)
+-------------------------------------------------------------------------------------------------------------------
+
+Copyright (c) 2023 Evan Wallace
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------------------------------------------
+Appendix C: shadcn/ui LICENSE.md (verbatim)
+-------------------------------------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2023 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------------------------------------------
+Appendix D: Unicode License v3 (verbatim)
+-------------------------------------------------------------------------------------------------------------------
+
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2026 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.

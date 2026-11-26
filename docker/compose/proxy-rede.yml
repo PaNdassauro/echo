@@ -1,0 +1,30 @@
+# Atrás de um proxy reverso em container (Traefik, Coolify, cloudflared em Docker):
+# `./install.sh --behind-proxy --url https://echo.exemplo.com --proxy-network traefik`.
+# Liga o gateway a uma rede Docker externa, que já tem de existir, com o apelido `<projeto>-gateway`; o proxy aponta
+# para http://<projeto>-gateway:80 (sem reescrever caminho, com WebSocket e sem limite de corpo).
+# A rede `default` continua: o gateway precisa dela para falar com auth, rest, storage, realtime, functions e qr. Ele
+# os chama pelo nome QUALIFICADO (`auth.<projeto>_default`, ECHO_REDE_INTERNA): o nome curto resolveria pela rede que
+# ordena primeiro, e um vizinho da rede do proxy com apelido `auth`/`rest`/`functions` receberia senhas e a service_role.
+# Isso evita a colisão ACIDENTAL. NÃO protege contra um container hostil da rede do proxy com o apelido literal
+# `auth.<projeto>_default` (o DNS do Docker casa o nome inteiro primeiro): use --proxy-network só com uma rede de proxy
+# em que todos os containers são de confiança, ou com uma rede dedicada ao Echo e ao proxy.
+# O único nome que o proxy deve usar é o apelido `<projeto>-gateway`.
+# O listener interno do gateway (:8000, sem limite de login por IP nem os bloqueios do site público) NÃO pode ficar
+# visível na rede do proxy: o apelido `<projeto>-gateway-interno` existe só na rede `default` e o entrypoint prende o
+# :8000 ao IP que ele resolve (ECHO_ALIAS_REDE_INTERNA).
+services:
+  gateway:
+    environment:
+      ECHO_ALIAS_REDE_INTERNA: ${COMPOSE_PROJECT_NAME:?rode ./install.sh (COMPOSE_PROJECT_NAME ausente)}-gateway-interno
+    networks:
+      default:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME:?rode ./install.sh (COMPOSE_PROJECT_NAME ausente)}-gateway-interno
+      proxy:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME:?rode ./install.sh (COMPOSE_PROJECT_NAME ausente)}-gateway
+
+networks:
+  proxy:
+    external: true
+    name: ${ECHO_PROXY_NETWORK:?rode ./install.sh (ECHO_PROXY_NETWORK ausente)}

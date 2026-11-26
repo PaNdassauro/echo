@@ -1,0 +1,12 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.87.1",
+    "https://esm.sh/@supabase/supabase-js@2.87.1": "npm:@supabase/supabase-js@2.87.1",
+    "https://esm.sh/zod@3.23.8": "npm:zod@3.23.8",
+    "https://esm.sh/jpeg-js@0.4.4": "npm:jpeg-js@0.4.4",
+    "https://esm.sh/thumbhash@0.1.1": "npm:thumbhash@0.1.1",
+    "https://esm.sh/unpdf@0.12.1": "npm:unpdf@0.12.1",
+    "https://deno.land/std@0.168.0/http/server.ts": "./shim/std_server.ts"
+  },
+  "lock": { "path": "./deno.lock", "frozen": true }
+}

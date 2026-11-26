@@ -1,0 +1,16 @@
+# Contexto de build "." (db, gateway e functions). O qr tem contexto próprio (qr-service/) e o .dockerignore dele.
+# Sem .env* no contexto, nenhuma VITE_* entra no build do front; com `**/`, nem o supabase/functions/.env de
+# desenvolvimento entra na imagem.
+**/node_modules
+dist
+.git
+**/.env
+**/.env.*
+!**/.env.example
+qr-service
+backups
+docker-compose.override.yml
+**/*.log
+# Backup com --dest dentro do repo (tar dos volumes e manifest) fora do contexto de build.
+**/*.tar
+**/manifest.json

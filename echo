@@ -1,0 +1,853 @@
+#!/usr/bin/env bash
+# CLI de operação do Echo auto-hospedado (a instalação é o ./install.sh).
+#
+#   ./echo status | logs [serviço] [-f] [--tail N] | up | down | restart [serviço]
+#   ./echo upgrade [--to vX.Y.Z] [--no-backup] [--force]
+#   ./echo backup [--dest DIR] | restore DIR
+#   ./echo reset-password EMAIL [--senha-stdin] | recovery-link EMAIL | setup-link
+#   ./echo doctor | psql | env check
+#
+# Usa o .env da pasta do script, ou o de ECHO_ENV_FILE (age só no projeto Compose desse arquivo). Os arquivos do
+# compose vêm do COMPOSE_FILE do .env. Funciona de qualquer diretório de trabalho (faz cd para a pasta do script).
+set -euo pipefail
+
+ECHO_FONTE="${BASH_SOURCE[0]}"
+ECHO_DIR="$(cd "$(dirname "$(readlink -f "$ECHO_FONTE" 2>/dev/null || printf '%s' "$ECHO_FONTE")")" && pwd)"
+export ECHO_DIR
+
+# Funções compartilhadas (versão, .env, compose, tentativas, build, RAM). O corpo do install.sh só roda se executado direto.
+# shellcheck source=install.sh
+. "$ECHO_DIR/install.sh"
+ECHO_USO_DICA="./echo --help"
+
+# Pasta de onde o comando foi chamado: carregar() faz cd para o ECHO_DIR, e o --dest do backup e o DIR do restore
+# relativos valem a partir daqui, não da pasta do repositório.
+ECHO_CWD="$PWD"
+export ECHO_CWD
+
+ECHO_ENV_FILE="${ECHO_ENV_FILE:-$ECHO_DIR/.env}"
+case "$ECHO_ENV_FILE" in
+  /*) ;;
+  *) ECHO_ENV_FILE="$ECHO_CWD/$ECHO_ENV_FILE" ;;
+esac
+export ECHO_ENV_FILE
+
+# Segredos que o `restore` repõe sempre no .env atual (3.9): sem eles o banco e o Vault do backup não abrem.
+CHAVES_IMUTAVEIS=(
+  POSTGRES_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY VAULT_ROOT_KEY AI_KEY_SECRET REALTIME_SECRET_KEY_BASE
+  REALTIME_DB_ENC_KEY REALTIME_RELEASE_COOKIE ZAPO_DB_PASSWORD QR_WEBHOOK_SECRET WHATSAPP_VERIFY_TOKEN
+  INSTAGRAM_OAUTH_STATE_SECRET ECHO_SETUP_TOKEN VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT
+)
+VOLUMES_DO_BACKUP=(db-data qr-sessions storage-data caddy-data)
+VAULT_NOMES="'project_url','service_role_key','qr_service_url','ai_key_secret'"
+
+uso_cli() {
+  cat <<'EOF'
+Uso: ./echo <comando> [opções]
+
+  status                              estado dos serviços, versão e fila do qr
+  logs [serviço] [-f] [--tail N]      logs (padrão: últimas 200 linhas)
+  up | down | restart [serviço]       sobe, para (nunca apaga volumes) ou reinicia
+  upgrade [--to vX.Y.Z] [--no-backup] [--force]
+                                      backup, código novo, imagens novas, migrações
+  backup [--dest DIR]                 backup frio (para o stack por alguns minutos)
+  restore DIR                         restaura um backup (a origem precisa estar desligada)
+  reset-password EMAIL [--senha-stdin]   define uma senha nova (gera e mostra uma vez)
+  recovery-link EMAIL                 link de redefinição de senha (não envia e-mail)
+  setup-link                          link do primeiro acesso, enquanto ele estiver aberto
+  doctor                              diagnóstico só de leitura (OK, AVISO, ERRO)
+  psql [args]                         console do Postgres (usuário postgres)
+  env check                           chaves do .env que faltam ou sobraram (sem valores)
+
+Variável: ECHO_ENV_FILE=/caminho/.env faz o comando agir só no projeto desse arquivo.
+EOF
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# Base
+# ---------------------------------------------------------------------------------------------------------------
+
+carregar() {
+  [ -f "$ECHO_ENV_FILE" ] || die "não encontrei o .env em $ECHO_ENV_FILE. Rode ./install.sh primeiro (ou aponte ECHO_ENV_FILE)."
+  ECHO_PROJ="$(env_get "$ECHO_ENV_FILE" COMPOSE_PROJECT_NAME)"
+  ECHO_PROJ="${ECHO_PROJ:-echo}"
+  export ECHO_VERSION
+  ECHO_VERSION="$(ler_versao)"
+  if git -C "$ECHO_DIR" rev-parse --short HEAD >/dev/null 2>&1; then
+    GIT_SHA="$(git -C "$ECHO_DIR" rev-parse --short HEAD)"
+    export GIT_SHA
+  fi
+  isolar_compose
+  cd "$ECHO_DIR"
+  case ":$(env_get "$ECHO_ENV_FILE" COMPOSE_FILE):" in
+    *:docker-compose.override.yml:*) criar_override_vazio ;;
+  esac
+}
+
+# Executa SQL no banco (stdin) e devolve o resultado cru.
+sql() {
+  printf '%s\n' "$1" | compose exec -T db psql -U postgres -d postgres -Atq -v ON_ERROR_STOP=1 -f -
+}
+
+sha256_de() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+carimbo() { date +%Y%m%d-%H%M%S; }
+
+imagem_db() { printf '%s-db:local' "$ECHO_PROJ"; }
+
+# ---------------------------------------------------------------------------------------------------------------
+# Operação
+# ---------------------------------------------------------------------------------------------------------------
+
+cmd_up() { compose up -d --wait --wait-timeout 900 "$@"; }
+
+cmd_down() {
+  local a
+  for a in "$@"; do
+    case "$a" in
+      -v | --volumes | --rmi | --rmi=*) die "'./echo down' nunca apaga volumes nem imagens ($a). Para apagar os dados, faça um backup e use o docker compose à mão." ;;
+    esac
+  done
+  compose down "$@"
+}
+
+# Reinicia os containers como estão: NÃO relê o .env (o ambiente é o da criação do container). Para aplicar uma mudança do
+# .env use ./echo up, que recria o que mudou. As correções do doctor mandam ./echo up por isso.
+cmd_restart() { compose restart "$@"; }
+
+# O container tem a variável preenchida? 0 = sim, 1 = vazia, 2 = não deu para ler (serviço parado). Nunca imprime o valor.
+valor_vivo() {
+  local saida
+  saida="$(compose exec -T "$1" printenv "$2" 2>/dev/null)" || return 2
+  [ -n "${saida//[[:space:]]/}" ]
+}
+
+# O db em loop de reinício com linhas `preflight:` no log = a guarda de segredos (docker/db/preflight.sh) recusou o
+# .env (cópia do .env.example, por exemplo). Só vale enquanto o db não está saudável.
+MSG_PREFLIGHT="o banco recusou os segredos do .env (linhas 'preflight:' no log do db): o .env tem segredo de exemplo. Rode ./install.sh (instalação nova) ou restaure o .env do backup."
+db_recusou_segredos() {
+  local saude
+  saude="$(compose ps db --format '{{.Health}}' 2>/dev/null || true)"
+  [ "$saude" != healthy ] || return 1
+  compose logs --no-color --tail 40 db 2>/dev/null | grep -q 'preflight:'
+}
+
+cmd_status() {
+  compose ps
+  printf '\nVersão: %s (commit %s)\n' "$ECHO_VERSION" "$(git -C "$ECHO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'desconhecido')"
+  printf 'Endereço: %s\n' "$(env_get "$ECHO_ENV_FILE" ECHO_PUBLIC_URL)"
+  if db_recusou_segredos; then printf '\nAVISO: %s\n' "$MSG_PREFLIGHT"; fi
+  local qr
+  if qr="$(compose exec -T gateway wget -qO- http://127.0.0.1:8000/qr/health 2>/dev/null)" && [ -n "$qr" ]; then
+    printf 'qr: %s\n' "$qr"
+  else
+    printf 'qr: indisponível (o serviço está de pé? ./echo logs qr)\n'
+  fi
+}
+
+cmd_logs() {
+  local tail=200 seguir=false svc=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -f | --follow) seguir=true; shift ;;
+      --tail) [[ "${2:-}" =~ ^[0-9]+$ ]] || uso_erro "--tail precisa de um número"; tail="$2"; shift 2 ;;
+      -*) uso_erro "opção desconhecida em logs: $1" ;;
+      *) svc="$1"; shift ;;
+    esac
+  done
+  local -a args=(logs --tail "$tail")
+  [ "$seguir" = false ] || args+=(-f)
+  [ -z "$svc" ] || args+=("$svc")
+  compose "${args[@]}"
+}
+
+cmd_psql() {
+  if [ -t 0 ]; then
+    compose exec db psql -U postgres "$@"
+  else
+    compose exec -T db psql -U postgres "$@"
+  fi
+}
+
+senha_forte() {
+  local bruto
+  bruto="$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n')"
+  printf '%s' "${bruto:0:20}"
+}
+
+email_valido() { [[ "$1" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; }
+
+cmd_reset_password() {
+  local email="" stdin=false senha rc=0 saida
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --senha-stdin) stdin=true; shift ;;
+      -*) uso_erro "opção desconhecida em reset-password: $1" ;;
+      *) [ -z "$email" ] || uso_erro "reset-password recebe um só e-mail"; email="$1"; shift ;;
+    esac
+  done
+  [ -n "$email" ] || uso_erro "uso: ./echo reset-password EMAIL [--senha-stdin]"
+  email_valido "$email" || uso_erro "e-mail inválido: $email"
+  if [ "$stdin" = true ]; then
+    IFS= read -r senha || true
+  else
+    senha="$(senha_forte)"
+  fi
+  [ "${#senha}" -ge 8 ] || uso_erro "a senha precisa ter pelo menos 8 caracteres"
+  saida="$(printf '%s\n' "$senha" | compose exec -T functions echo-admin reset-password --email "$email" 2>&1)" || rc=$?
+  case "$rc" in
+    0) ;;
+    3) die "não existe usuário com o e-mail $email." ;;
+    2) die "entrada inválida para o echo-admin: $saida" ;;
+    *) die "o echo-admin falhou (código $rc): $saida" ;;
+  esac
+  if [ "$stdin" = true ]; then
+    msg "Senha de $email atualizada."
+  else
+    printf 'Senha nova de %s (aparece só desta vez): %s\n' "$email" "$senha"
+  fi
+}
+
+cmd_recovery_link() {
+  [ $# -eq 1 ] || uso_erro "uso: ./echo recovery-link EMAIL"
+  email_valido "$1" || uso_erro "e-mail inválido: $1"
+  local rc=0 saida
+  saida="$(compose exec -T functions echo-admin recovery-link --email "$1" 2>&1)" || rc=$?
+  case "$rc" in
+    0) printf '%s\n' "$saida" ;;
+    3) die "não existe usuário com o e-mail $1." ;;
+    *) die "o echo-admin falhou (código $rc): $saida" ;;
+  esac
+}
+
+cmd_setup_link() {
+  local token url saida
+  token="$(env_get "$ECHO_ENV_FILE" ECHO_SETUP_TOKEN)"
+  url="$(env_get "$ECHO_ENV_FILE" ECHO_PUBLIC_URL)"
+  [ -n "$token" ] || die "o primeiro acesso está desligado (ECHO_SETUP_TOKEN vazio no .env)."
+  saida="$(compose exec -T functions echo-admin setup-status 2>&1)" || die "não consegui consultar as funções: $saida"
+  case "$saida" in
+    *'"precisa_setup":true'*) printf '%s/setup?codigo=%s\n' "$url" "$token" ;;
+    *'"precisa_setup":false'*) die "esta instalação já foi configurada: entre em $url/auth. Esqueceu a senha? ./echo reset-password EMAIL" ;;
+    *) die "resposta inesperada do echo-admin: $saida" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# env check
+# ---------------------------------------------------------------------------------------------------------------
+
+chaves_do_arquivo() {
+  sed -n 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' "$1" | sort -u
+}
+
+cmd_env() {
+  [ "${1:-}" = "check" ] || uso_erro "uso: ./echo env check"
+  [ -f "$ECHO_ENV_FILE" ] || die "não encontrei o .env em $ECHO_ENV_FILE."
+  [ -f "$ECHO_DIR/.env.example" ] || die "não encontrei $ECHO_DIR/.env.example (a lista de chaves esperadas)."
+  local faltando obsoletas
+  faltando="$(comm -13 <(chaves_do_arquivo "$ECHO_ENV_FILE") <(chaves_do_arquivo "$ECHO_DIR/.env.example") | tr '\n' ' ')"
+  obsoletas="$(comm -23 <(chaves_do_arquivo "$ECHO_ENV_FILE") <(chaves_do_arquivo "$ECHO_DIR/.env.example") | tr '\n' ' ')"
+  [ -z "$faltando" ] || printf 'faltando no .env: %s\n  correção: ./install.sh --env-only\n' "$faltando"
+  [ -z "$obsoletas" ] || printf 'no .env e fora do .env.example (obsoletas ou suas): %s\n' "$obsoletas"
+  if [ -z "$faltando" ] && [ -z "$obsoletas" ]; then printf 'ok: o .env tem exatamente as chaves do .env.example.\n'; fi
+  [ -z "$faltando" ]
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# doctor
+# ---------------------------------------------------------------------------------------------------------------
+
+D_ERROS=0
+d_ok() { printf 'OK %s: %s\n' "$1" "$2"; }
+d_aviso() { printf 'AVISO %s: %s\n' "$1" "$2"; }
+d_erro() { printf 'ERRO %s: %s\n' "$1" "$2"; D_ERROS=$((D_ERROS + 1)); }
+
+# Regras de segredo da guarda do banco (D43): só o NOME da variável aparece na saída.
+# Par de docker/db/preflight.sh: hex aceita maiúscula e minúscula, salvo VAULT_ROOT_KEY (só minúscula). Mudou lá, muda aqui.
+formato_do_segredo() {
+  case "$1" in
+    POSTGRES_PASSWORD | ZAPO_DB_PASSWORD) printf '^[0-9a-fA-F]{48}$' ;;
+    JWT_SECRET | AI_KEY_SECRET | QR_WEBHOOK_SECRET | WHATSAPP_VERIFY_TOKEN | INSTAGRAM_OAUTH_STATE_SECRET) printf '^[0-9a-fA-F]{64}$' ;;
+    VAULT_ROOT_KEY) printf '^[0-9a-f]{64}$' ;;
+    REALTIME_SECRET_KEY_BASE) printf '^[0-9a-fA-F]{96}$' ;;
+    REALTIME_DB_ENC_KEY) printf '^[0-9a-fA-F]{16}$' ;;
+    REALTIME_RELEASE_COOKIE) printf '^[0-9a-fA-F]{56}$' ;;
+    ECHO_SETUP_TOKEN) printf '^[0-9a-fA-F]{32,}$' ;;
+    ANON_KEY | SERVICE_ROLE_KEY) printf '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' ;;
+  esac
+}
+
+doctor_segredos() {
+  local k v fmt ruins=""
+  for k in POSTGRES_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY VAULT_ROOT_KEY AI_KEY_SECRET REALTIME_SECRET_KEY_BASE \
+    REALTIME_DB_ENC_KEY REALTIME_RELEASE_COOKIE QR_WEBHOOK_SECRET WHATSAPP_VERIFY_TOKEN INSTAGRAM_OAUTH_STATE_SECRET \
+    ZAPO_DB_PASSWORD ECHO_SETUP_TOKEN; do
+    v="$(env_get "$ECHO_ENV_FILE" "$k")"
+    if [ -z "$v" ]; then
+      [ "$k" = "ECHO_SETUP_TOKEN" ] || ruins="$ruins $k(vazio)"
+      continue
+    fi
+    fmt="$(formato_do_segredo "$k")"
+    if [[ "$v" == *__GERE* ]]; then
+      ruins="$ruins $k(placeholder)"
+    elif printf '%s' "$v" | grep -Eq '^(.)\1*$'; then
+      ruins="$ruins $k(um caractere só)"
+    elif ! [[ "$v" =~ $fmt ]]; then
+      ruins="$ruins $k(formato)"
+    fi
+  done
+  if [ -z "$ruins" ]; then
+    d_ok "segredos" "todos presentes, fora do formato placeholder e no formato esperado"
+  else
+    d_erro "segredos" "recusados pela guarda do banco:$ruins. Correção: refaça o .env com ./install.sh (instalação nova) ou restaure o .env do backup."
+  fi
+}
+
+doctor_servicos() {
+  local esperados svc estado saude codigo vistos=" "
+  esperados="$(compose config --services 2>/dev/null || true)"
+  while IFS='|' read -r svc estado saude codigo; do
+    [ -n "$svc" ] || continue
+    vistos="$vistos$svc "
+    case "$estado" in
+      running)
+        case "$saude" in
+          healthy | "") d_ok "serviço $svc" "rodando${saude:+ e saudável}" ;;
+          starting) d_aviso "serviço $svc" "ainda iniciando (healthcheck em andamento). Veja: ./echo logs $svc" ;;
+          *) d_erro "serviço $svc" "rodando, mas $saude. Veja: ./echo logs $svc --tail 100" ;;
+        esac
+        ;;
+      exited)
+        if [ "${codigo:-0}" = "0" ]; then d_ok "serviço $svc" "concluído (tarefa de uma execução só)"; else d_erro "serviço $svc" "terminou com código $codigo. Veja: ./echo logs $svc --tail 100"; fi
+        ;;
+      *) d_erro "serviço $svc" "estado '$estado'. Correção: ./echo up e, se persistir, ./echo logs $svc --tail 100" ;;
+    esac
+  done < <(compose ps -a --format '{{.Service}}|{{.State}}|{{.Health}}|{{.ExitCode}}' 2>/dev/null || true)
+  for svc in $esperados; do
+    case "$vistos" in
+      *" $svc "*) ;;
+      *) d_erro "serviço $svc" "não foi criado. Correção: ./echo up" ;;
+    esac
+  done
+}
+
+doctor_banco() {
+  local db_estado q vivo
+  db_estado="$(compose ps db --format '{{.State}}' 2>/dev/null || true)"
+  if [ "$db_estado" != "running" ] || db_recusou_segredos; then
+    if db_recusou_segredos; then
+      d_erro "banco" "$MSG_PREFLIGHT As checagens que leem o banco foram puladas."
+    else
+      d_erro "banco" "o serviço db não está rodando: as checagens que leem o banco foram puladas. Correção: ./echo up"
+    fi
+    return 0
+  fi
+
+  if q="$(sql "SELECT count(*) FROM vault.decrypted_secrets WHERE decrypted_secret IS NOT NULL AND name IN ($VAULT_NOMES)" 2>&1)"; then
+    if [ "$q" = "4" ]; then d_ok "Vault" "os 4 segredos (project_url, service_role_key, qr_service_url, ai_key_secret) existem e decifram"; else d_erro "Vault" "só $q de 4 segredos decifráveis. A VAULT_ROOT_KEY do .env não é a do banco? Restaure o .env do backup."; fi
+  else
+    d_erro "Vault" "não consegui ler vault.decrypted_secrets: $q"
+  fi
+
+  if q="$(sql "SELECT count(*) FROM public.phone_numbers WHERE connection_type = 'business_api'" 2>&1)"; then
+    if [ "$q" != "0" ] && [ -z "$(env_get "$ECHO_ENV_FILE" WHATSAPP_APP_SECRET)" ]; then
+      d_erro "Cloud API" "há $q linha(s) business_api e WHATSAPP_APP_SECRET está vazio: um POST sem assinatura seria aceito. Preencha o segredo do app da Meta no .env e aplique com ./echo up functions (o restart não relê o .env)."
+    elif [ "$q" = "0" ]; then
+      d_ok "Cloud API" "nenhuma linha business_api (o segredo do app não é exigido)"
+    else
+      # O .env está preenchido: confere o que a função tem de verdade (o restart não relê o .env).
+      if valor_vivo functions WHATSAPP_APP_SECRET; then vivo=0; else vivo=$?; fi
+      if [ "$vivo" = 1 ]; then
+        d_aviso "Cloud API" "$q linha(s) business_api: o .env tem WHATSAPP_APP_SECRET, mas a função em execução não (o .env mudou e não foi aplicado: um POST sem assinatura ainda seria aceito). Correção: ./echo up functions"
+      else
+        d_ok "Cloud API" "$q linha(s) business_api e WHATSAPP_APP_SECRET preenchido"
+      fi
+    fi
+  else
+    d_aviso "Cloud API" "não consegui contar as linhas business_api: $q"
+  fi
+
+  if q="$(sql "SELECT count(*) FROM cron.job_run_details WHERE status = 'failed' AND start_time > now() - interval '15 minutes'" 2>&1)"; then
+    if [ "$q" = "0" ]; then d_ok "cron" "nenhuma execução com falha nos últimos 15 min"; else d_aviso "cron" "$q execução(ões) com falha nos últimos 15 min. Veja: ./echo psql -c \"select jobid, return_message from cron.job_run_details where status='failed' order by start_time desc limit 5\""; fi
+  else
+    d_aviso "cron" "não consegui ler cron.job_run_details: $q"
+  fi
+
+  if q="$(sql "SELECT count(*) FROM net._http_response WHERE status_code >= 400 AND created > now() - interval '15 minutes'" 2>&1)"; then
+    if [ "$q" = "0" ]; then d_ok "pg_net" "nenhuma resposta >= 400 dos crons nos últimos 15 min"; else d_aviso "pg_net" "$q resposta(s) >= 400 nos últimos 15 min (crons chamando as funções). Veja: ./echo logs functions --tail 100"; fi
+  else
+    d_aviso "pg_net" "não consegui ler net._http_response: $q"
+  fi
+
+  local base
+  base="$(env_get "$ECHO_ENV_FILE" ECHO_PUBLIC_URL)"
+  if q="$(printf '%s\n' "SELECT count(*) FROM (SELECT media_url FROM public.messages WHERE media_url LIKE '%/storage/v1/object/public/%' ORDER BY created_at DESC LIMIT 50) m WHERE left(media_url, length(:'base')) <> :'base'" | compose exec -T db psql -U postgres -d postgres -Atq -v ON_ERROR_STOP=1 -v "base=$base" -f - 2>&1)"; then
+    if [ "$q" = "0" ]; then d_ok "endereço das mídias" "as últimas mídias gravadas usam $base"; else d_aviso "endereço das mídias" "$q das últimas 50 mídias foram gravadas com outro endereço (o ECHO_PUBLIC_URL mudou?). Elas continuam apontando para o endereço antigo."; fi
+  else
+    d_aviso "endereço das mídias" "não consegui conferir messages.media_url: $q"
+  fi
+}
+
+# E-mail: a mesma regra do entrypoint do gateway e de supabase/functions/_shared/email.ts (`lerConfigEmail`): envia quem
+# tem SMTP_HOST com remetente (EMAIL_FROM ou SMTP_ADMIN_EMAIL) ou RESEND_API_KEY com EMAIL_FROM. Mudou lá, muda aqui.
+doctor_email() {
+  local host from admin resend secure porta
+  host="$(env_get "$ECHO_ENV_FILE" SMTP_HOST)"
+  from="$(env_get "$ECHO_ENV_FILE" EMAIL_FROM)"
+  admin="$(env_get "$ECHO_ENV_FILE" SMTP_ADMIN_EMAIL)"
+  resend="$(env_get "$ECHO_ENV_FILE" RESEND_API_KEY)"
+  if [ -n "$host" ]; then
+    secure="$(env_get "$ECHO_ENV_FILE" SMTP_SECURE | tr '[:upper:]' '[:lower:]')"
+    porta="$(env_get "$ECHO_ENV_FILE" SMTP_PORT)"
+    if [ -z "$from" ] && [ -z "$admin" ]; then
+      d_erro "e-mail" "SMTP_HOST está preenchido e não há remetente (SMTP_ADMIN_EMAIL ou EMAIL_FROM): nenhum e-mail sai. Correção: preencha SMTP_ADMIN_EMAIL no .env e aplique com ./echo up auth functions gateway (o restart não relê o .env)."
+    elif [ -n "$secure" ] && [ "$secure" != starttls ] && [ "$secure" != tls ] && [ "$secure" != none ]; then
+      d_erro "e-mail" "SMTP_SECURE precisa ser starttls, tls ou none (está diferente disso): as edges recusam o envio. Correção: ajuste no .env e aplique com ./echo up functions."
+    elif [ -n "$porta" ] && { ! [[ "$porta" =~ ^[0-9]{1,5}$ ]] || [ "$((10#$porta))" -lt 1 ] || [ "$((10#$porta))" -gt 65535 ]; }; then
+      d_erro "e-mail" "SMTP_PORT precisa ser um número de 1 a 65535: as edges recusam o envio. Correção: ajuste no .env e aplique com ./echo up auth functions."
+    elif [ -z "$admin" ]; then
+      d_aviso "e-mail" "SMTP configurado com EMAIL_FROM, mas sem SMTP_ADMIN_EMAIL: os convites saem, a recuperação de senha pela tela não (o Auth só lê SMTP_ADMIN_EMAIL)."
+    else
+      d_ok "e-mail" "SMTP configurado"
+    fi
+  elif [ -n "$resend" ]; then
+    if [ -z "$from" ]; then
+      d_aviso "e-mail" "RESEND_API_KEY está preenchida e EMAIL_FROM não: nenhum e-mail sai. Correção: preencha EMAIL_FROM no .env e aplique com ./echo up functions gateway (o restart não relê o .env)."
+    else
+      d_ok "e-mail" "Resend configurado (a recuperação de senha pela tela pede SMTP)"
+    fi
+  else
+    d_ok "e-mail" "sem SMTP (convite por link; senha por ./echo reset-password)"
+  fi
+  # O .env pode ter mudado sem ./echo up (o restart não o relê): compara com a função em execução.
+  local var vivo
+  for var in SMTP_HOST RESEND_API_KEY; do
+    [ -n "$(env_get "$ECHO_ENV_FILE" "$var")" ] || continue
+    if valor_vivo functions "$var"; then vivo=0; else vivo=$?; fi
+    if [ "$vivo" = 1 ]; then d_aviso "e-mail" "o .env tem $var, mas a função em execução não: o .env mudou e não foi aplicado. Correção: ./echo up auth functions gateway"; fi
+  done
+}
+
+cmd_doctor() {
+  local compose_v docker_v arq ram disco swap_kb url host gw
+  docker_v="$(docker version -f '{{.Server.Version}}' 2>/dev/null || true)"
+  compose_v="$(docker compose version --short 2>/dev/null || true)"
+  if [ -z "$docker_v" ]; then
+    d_erro "docker" "o daemon não responde. Correção: inicie o Docker e confira as permissões do seu usuário."
+  else
+    d_ok "docker" "$docker_v"
+  fi
+  if [ -z "$compose_v" ]; then
+    d_erro "compose" "plugin 'docker compose' ausente. Correção: instale o Docker Compose v2."
+  elif versao_ge "$compose_v" "$MIN_COMPOSE"; then
+    d_ok "compose" "$compose_v (mínimo $MIN_COMPOSE)"
+  else
+    d_erro "compose" "$compose_v é anterior ao mínimo $MIN_COMPOSE. Correção: atualize o plugin."
+  fi
+
+  arq="$(uname -m)"
+  case "$arq" in
+    x86_64) d_ok "arquitetura" "$arq" ;;
+    aarch64 | arm64) d_aviso "arquitetura" "$arq: as imagens existem, mas o build e a execução em ARM64 não foram testados." ;;
+    *) d_erro "arquitetura" "$arq não é suportada (só x86_64 e aarch64/arm64)." ;;
+  esac
+
+  ram="$(ram_mb)"
+  swap_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  swap_kb="${swap_kb:-0}"
+  if [ "$ram" -eq 0 ]; then
+    d_aviso "RAM" "não consegui medir."
+  elif [ "$ram" -lt 2048 ]; then
+    d_aviso "RAM" "$(gb_texto "$ram"): abaixo de 2 GB. Correção: mais memória ou swap."
+  elif [ "$ram" -lt 4096 ] && [ "$swap_kb" -eq 0 ]; then
+    d_aviso "RAM" "$(gb_texto "$ram") e sem swap: o build pode ser morto por falta de memória. Correção: crie 2 GB de swap."
+  else
+    d_ok "RAM" "$(gb_texto "$ram"), swap $(gb_texto "$((swap_kb / 1024))")"
+  fi
+
+  disco="$(disco_livre_mb)"
+  if [ "$disco" -lt 10240 ]; then d_aviso "disco" "$(gb_texto "$disco") livres: disco cheio derruba o Postgres. Correção: libere espaço (nunca use prune sem olhar)."; else d_ok "disco" "$(gb_texto "$disco") livres"; fi
+
+  if grep -qi microsoft /proc/version 2>/dev/null; then d_aviso "WSL" "WSL serve para avaliar; em produção, use Linux (o relógio salta e a sessão do WhatsApp cai quando o Windows hiberna)."; else d_ok "WSL" "não é WSL"; fi
+
+  # Porta não publicada com o gateway de pé (modo --proxy-network): `docker compose port` imprime ":0", "invalid IP:0"
+  # ou nada, conforme a versão do Compose. Porta publicada nunca termina em ":0".
+  gw="$(compose port gateway 80 2>/dev/null || true)"
+  if [[ "$gw" == *:0 ]]; then
+    d_ok "portas" "o gateway está de pé e não publica porta no host (o proxy chega pela rede Docker)"
+  elif [ -n "$gw" ]; then
+    d_ok "portas" "o gateway publica $gw"
+  else
+    local porta ocupada=0
+    porta="$(env_get "$ECHO_ENV_FILE" ECHO_HTTP_PORT)"
+    if porta_ocupada "${porta:-8088}"; then ocupada=0; else ocupada=$?; fi
+    case "$ocupada" in
+      0) d_aviso "portas" "o gateway não está de pé e a porta ${porta:-8088} do host já está em uso por outro processo." ;;
+      2) d_aviso "portas" "sem o comando 'ss', não deu para conferir a porta ${porta:-8088}." ;;
+      *) d_ok "portas" "a porta ${porta:-8088} está livre (o stack está parado)" ;;
+    esac
+  fi
+
+  local t_host t_db
+  t_host="$(date -u +%s)"
+  if t_db="$(compose exec -T db date -u +%s 2>/dev/null)" && [[ "$t_db" =~ ^[0-9]+$ ]]; then
+    local dif=$((t_host - t_db))
+    [ "$dif" -ge 0 ] || dif=$((-dif))
+    if [ "$dif" -gt 60 ]; then d_aviso "relógio" "diferença de ${dif}s entre o host e o banco: JWT e crons ficam errados. Correção: timedatectl set-ntp true (no WSL: wsl --shutdown)."; else d_ok "relógio" "host e banco com ${dif}s de diferença"; fi
+  else
+    d_aviso "relógio" "não deu para ler a hora do contêiner db (ele está rodando?)."
+  fi
+
+  if [ -f "$ECHO_DIR/.env.example" ]; then
+    local faltando obsoletas
+    faltando="$(comm -13 <(chaves_do_arquivo "$ECHO_ENV_FILE") <(chaves_do_arquivo "$ECHO_DIR/.env.example") | tr '\n' ' ')"
+    obsoletas="$(comm -23 <(chaves_do_arquivo "$ECHO_ENV_FILE") <(chaves_do_arquivo "$ECHO_DIR/.env.example") | tr '\n' ' ')"
+    if [ -n "$faltando" ]; then d_erro ".env" "faltam chaves do .env.example: $faltando. Correção: ./install.sh --env-only"; else d_ok ".env" "tem todas as chaves do .env.example"; fi
+    [ -z "$obsoletas" ] || d_aviso ".env" "chaves que o .env.example não conhece (obsoletas ou suas): $obsoletas"
+  else
+    d_aviso ".env" "sem .env.example na pasta: não deu para comparar as chaves."
+  fi
+
+  doctor_segredos
+
+  doctor_email
+
+  url="$(env_get "$ECHO_ENV_FILE" ECHO_PUBLIC_URL)"
+  host="${url#*://}"
+  host="${host%%[:/]*}"
+  if [[ "$url" == http://* ]] && ip_literal "$host" && ! ip_privado "$host"; then
+    d_aviso "endereço" "$url é HTTP em IP público: senha e conversas passam sem criptografia, e não há PWA, push nem áudio. Correção: reinstale com um domínio (./install.sh --domain)."
+  elif [[ "$url" == http://* ]] && [ "$host" != "localhost" ] && [ "$host" != "127.0.0.1" ] && [ "$host" != "[::1]" ]; then
+    # A CSP do gateway só libera a origem do ECHO_PUBLIC_URL para a mídia gravada com ela: abrir por outro nome não carrega.
+    d_aviso "endereço" "$url é HTTP de um host que não é localhost: a mídia só carrega abrindo o Echo por este mesmo endereço, e não há PWA, push nem áudio. Para usar outro endereço, veja docs/self-hosting.md (O endereço fica fixo)."
+  elif [[ "$url" == https://* ]] && [ "$(env_get "$ECHO_ENV_FILE" ECHO_BEHIND_PROXY)" != "true" ] && command -v curl >/dev/null 2>&1; then
+    # Atrás de proxy o certificado é do proxy do usuário: só confere quando o Caddy do gateway é quem emite.
+    if curl -fsS --max-time 10 -o /dev/null "$url/config.js" >/dev/null 2>&1; then
+      d_ok "endereço" "$url (respondeu por HTTPS)"
+    else
+      d_aviso "endereço" "$url não respondeu por HTTPS desta máquina (stack parado, DNS que não aponta para cá, portas 80/443 fechadas no firewall ou certificado ainda não emitido). Veja: ./echo logs gateway (procure por 'acme' ou 'obtain') e dig +short <domínio>."
+    fi
+  else
+    d_ok "endereço" "$url"
+  fi
+
+  doctor_servicos
+  doctor_banco
+
+  if [ "$D_ERROS" -gt 0 ]; then
+    printf '\n%s erro(s). Corrija os itens ERRO acima.\n' "$D_ERROS"
+    return 1
+  fi
+  printf '\nSem erros.\n'
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# backup e restore frios (3.9)
+# ---------------------------------------------------------------------------------------------------------------
+
+volume_do_projeto() { printf '%s_%s' "$ECHO_PROJ" "$1"; }
+
+cmd_backup() {
+  local dest=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dest) [ $# -ge 2 ] || uso_erro "--dest precisa de um diretório"; dest="$2"; shift 2 ;;
+      *) uso_erro "opção desconhecida em backup: $1" ;;
+    esac
+  done
+  local img v vol
+  img="$(imagem_db)"
+  docker image inspect "$img" >/dev/null 2>&1 || die "a imagem $img não existe: rode ./install.sh (ela é construída lá)."
+  for v in "${VOLUMES_DO_BACKUP[@]}"; do
+    docker volume inspect "$(volume_do_projeto "$v")" >/dev/null 2>&1 || die "o volume $(volume_do_projeto "$v") não existe: não há o que salvar (o stack já foi instalado e iniciado?)."
+  done
+
+  [ -n "$dest" ] || dest="$ECHO_DIR/backups/echo-$(carimbo)"
+  case "$dest" in /*) ;; *) dest="$ECHO_CWD/$dest" ;; esac
+  if [ -e "$dest" ]; then
+    [ -d "$dest" ] && [ -z "$(ls -A "$dest")" ] || die "$dest já existe e não está vazio."
+    chmod 700 "$dest"
+  else
+    mkdir -p "$(dirname "$dest")"
+    mkdir -m 700 "$dest"
+  fi
+
+  ECHO_BACKUP_DEST="$dest"
+  msg "Backup frio em $dest"
+  # O backup devolve o stack ao estado em que o encontrou: o que estava parado (./echo down, migração de máquina) continua parado.
+  local rodando
+  rodando="$(compose ps --status running -q 2>/dev/null || true)"
+  if [ -n "$rodando" ]; then
+    msg "Parando o stack (volta no fim; leva alguns minutos)…"
+  else
+    msg "O stack está parado: o backup lê os volumes e não o liga."
+  fi
+  compose stop
+  local falhou=false
+  for v in "${VOLUMES_DO_BACKUP[@]}"; do
+    vol="$(volume_do_projeto "$v")"
+    msg "Salvando o volume $v…"
+    if ! docker run --rm --entrypoint sh -v "$vol:/v:ro" -v "$dest:/b" "$img" \
+      -c 'tar --numeric-owner -cf "/b/$1.tar" -C /v . && chown "$2:$3" "/b/$1.tar" && chmod 600 "/b/$1.tar"' \
+      sh "$v" "$(id -u)" "$(id -g)"; then
+      erro "falhou ao salvar o volume $v."
+      falhou=true
+      break
+    fi
+  done
+  if [ -n "$rodando" ]; then
+    msg "Subindo o stack de novo…"
+    compose up -d --wait --wait-timeout 900 || aviso "o stack não voltou saudável: rode ./echo doctor."
+  else
+    msg "O stack estava parado e continua parado."
+  fi
+  [ "$falhou" = false ] || die "backup incompleto: apague $dest e tente de novo."
+
+  cp "$ECHO_ENV_FILE" "$dest/.env"
+  chmod 600 "$dest"/*.tar "$dest/.env"
+
+  local base nome arquivos="" sep=""
+  base="$(docker image inspect -f '{{index .Config.Labels "org.echo.postgres-base"}}' "$img" 2>/dev/null || true)"
+  for nome in "${VOLUMES_DO_BACKUP[@]/%/.tar}" .env; do
+    arquivos="${arquivos}${sep}    \"$nome\": {\"bytes\": $(wc -c <"$dest/$nome" | tr -d ' '), \"sha256\": \"$(sha256_de "$dest/$nome")\"}"
+    sep=$',\n'
+  done
+  {
+    printf '{\n'
+    printf '  "echo_version": "%s",\n' "$ECHO_VERSION"
+    printf '  "postgres_base": "%s",\n' "$base"
+    printf '  "criado_em": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '  "arquivos": {\n%s\n  }\n' "$arquivos"
+    printf '}\n'
+  } >"$dest/manifest.json"
+  chmod 600 "$dest/manifest.json"
+  msg "Backup pronto: $dest (o .env vai junto: sem ele o backup não restaura; trate a pasta como segredo)."
+}
+
+manifesto_campo() {
+  sed -n "s/^[[:space:]]*\"$2\":[[:space:]]*\"\(.*\)\",\{0,1\}[[:space:]]*\$/\1/p" "$1" | head -n1
+}
+
+# Repõe no .env atual os segredos imutáveis do backup (cópia .env.bak.<ts> antes).
+repor_segredos() {
+  local backup_env="$1" k linha v tmp copia
+  copia="$ECHO_ENV_FILE.bak.$(carimbo)"
+  cp "$ECHO_ENV_FILE" "$copia"
+  chmod 600 "$copia"
+  for k in "${CHAVES_IMUTAVEIS[@]}"; do
+    linha="$(grep -E "^${k}=" "$backup_env" | tail -n1 || true)"
+    [ -n "$linha" ] || continue
+    v="${linha#*=}"
+    tmp="$(mktemp)"
+    K="$k" V="$v" awk 'BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
+      index($0, k "=") == 1 { if (!feito) { print k "=" v; feito = 1 } next }
+      { print }
+      END { if (!feito) print k "=" v }' "$ECHO_ENV_FILE" >"$tmp"
+    cat "$tmp" >"$ECHO_ENV_FILE"
+    rm -f "$tmp"
+  done
+  chmod 600 "$ECHO_ENV_FILE"
+  msg "Segredos do backup repostos no .env (cópia do anterior em $copia)."
+}
+
+cmd_restore() {
+  [ $# -eq 1 ] || uso_erro "uso: ./echo restore DIR"
+  local dir="$1" v img nome contagem esperado atual
+  case "$dir" in /*) ;; *) dir="$ECHO_CWD/$dir" ;; esac
+  [ -d "$dir" ] || die "$1 não é um diretório (procurei em $dir)."
+  dir="$(cd "$dir" && pwd)"
+  [ -f "$dir/manifest.json" ] || die "$dir/manifest.json não existe: não é um backup do ./echo backup."
+
+  msg "Conferindo os arquivos do backup (sha256)…"
+  local conferidos=" "
+  while read -r nome esperado; do
+    [ -f "$dir/$nome" ] || die "falta $nome no backup."
+    atual="$(sha256_de "$dir/$nome")"
+    [ "$atual" = "$esperado" ] || die "$nome está corrompido ou foi alterado (sha256 diferente do manifest)."
+    conferidos="$conferidos$nome "
+  done < <(sed -n 's/^[[:space:]]*"\([^"]*\)":[[:space:]]*{"bytes":[[:space:]]*[0-9]*,[[:space:]]*"sha256":[[:space:]]*"\([0-9a-f]*\)"}.*$/\1 \2/p' "$dir/manifest.json")
+  # Manifest reformatado, vazio ou incompleto não pode virar "nada a conferir": exige os 5 arquivos, antes de parar o stack.
+  for nome in "${VOLUMES_DO_BACKUP[@]/%/.tar}" .env; do
+    case "$conferidos" in *" $nome "*) ;; *) die "manifest ilegível ou incompleto: $nome não foi conferido pelo sha256. Nada foi alterado." ;; esac
+  done
+  for v in "${VOLUMES_DO_BACKUP[@]}"; do
+    [ -f "$dir/$v.tar" ] || die "falta $v.tar no backup."
+  done
+  [ -f "$dir/.env" ] || die "falta o .env no backup (sem ele o Vault e o banco não abrem)."
+
+  img="$(imagem_db)"
+  docker image inspect "$img" >/dev/null 2>&1 || die "a imagem $img não existe: rode ./install.sh antes (ele constrói as imagens)."
+  local base_backup base_atual versao_backup
+  base_backup="$(manifesto_campo "$dir/manifest.json" postgres_base)"
+  base_atual="$(docker image inspect -f '{{index .Config.Labels "org.echo.postgres-base"}}' "$img" 2>/dev/null || true)"
+  [ "$base_backup" = "$base_atual" ] || die "o Postgres do backup ($base_backup) não é o desta instalação ($base_atual): o diretório de dados não abriria. Use o código da versão que fez o backup."
+  versao_backup="$(manifesto_campo "$dir/manifest.json" echo_version)"
+  versao_ge "$ECHO_VERSION" "${versao_backup:-0.0.0}" || die "o backup é da versão $versao_backup, mais nova que este código ($ECHO_VERSION). Atualize o código antes."
+
+  printf '\nATENÇÃO: o restore APAGA os dados atuais do projeto "%s" (banco, arquivos, sessões do WhatsApp, certificados)\n' "$ECHO_PROJ"
+  printf 'e põe os do backup (%s). A instância de origem precisa estar DESLIGADA: duas cópias das sessões do WhatsApp\n' "$dir"
+  printf 'no ar ao mesmo tempo dessincronizam a criptografia e arriscam ban.\n'
+  printf 'Para confirmar, digite o nome do projeto (%s): ' "$ECHO_PROJ"
+  local resposta=""
+  IFS= read -r resposta || true
+  [ "$resposta" = "$ECHO_PROJ" ] || die "confirmação diferente de '$ECHO_PROJ': nada foi alterado."
+
+  local url_backup url_atual
+  url_backup="$(env_get "$dir/.env" ECHO_PUBLIC_URL)"
+  url_atual="$(env_get "$ECHO_ENV_FILE" ECHO_PUBLIC_URL)"
+  if [ -n "$url_backup" ] && [ "$url_backup" != "$url_atual" ]; then
+    aviso "o endereço do backup ($url_backup) difere do atual ($url_atual): as mídias já gravadas continuam com o endereço antigo."
+  fi
+
+  msg "Parando o stack…"
+  compose down
+  for v in "${VOLUMES_DO_BACKUP[@]}"; do
+    nome="$(volume_do_projeto "$v")"
+    msg "Restaurando o volume $v…"
+    if docker volume inspect "$nome" >/dev/null 2>&1; then docker volume rm "$nome" >/dev/null; fi
+    docker volume create --label "com.docker.compose.project=$ECHO_PROJ" --label "com.docker.compose.volume=$v" "$nome" >/dev/null
+    docker run --rm --entrypoint sh -v "$nome:/v" -v "$dir:/b:ro" "$img" -c 'tar --numeric-owner -xf "/b/$1.tar" -C /v' sh "$v" ||
+      die "restore interrompido no volume $v: os volumes estão incompletos (alguns do backup, outros vazios). NÃO rode ./echo up; libere espaço e rode ./echo restore $dir de novo (o backup continua íntegro)."
+  done
+
+  repor_segredos "$dir/.env"
+
+  msg "Subindo…"
+  compose up -d --wait --wait-timeout 900 || die "o stack não ficou saudável depois do restore: ./echo doctor"
+  contagem="$(sql "SELECT count(*) FROM vault.decrypted_secrets WHERE decrypted_secret IS NOT NULL AND name IN ($VAULT_NOMES)" 2>&1 || true)"
+  [ "$contagem" = "4" ] || die "o Vault tem $contagem de 4 segredos decifráveis: a chave do Vault (VAULT_ROOT_KEY) não bateu com a do backup."
+  msg "Restore concluído: Vault com os 4 segredos decifráveis. Confira: ./echo doctor"
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+# upgrade
+# ---------------------------------------------------------------------------------------------------------------
+
+major_de() { versao_limpa "$1" | cut -d. -f1; }
+
+cmd_upgrade() {
+  local alvo="" backup=true force=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ $# -ge 2 ] || uso_erro "--to precisa de uma versão (vX.Y.Z)"; alvo="$2"; shift 2 ;;
+      --no-backup) backup=false; shift ;;
+      --force) force=true; shift ;;
+      *) uso_erro "opção desconhecida em upgrade: $1" ;;
+    esac
+  done
+  if [ -n "$alvo" ] && ! [[ "$alvo" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then uso_erro "--to precisa ser uma tag vX.Y.Z (recebi '$alvo')"; fi
+  git -C "$ECHO_DIR" rev-parse --git-dir >/dev/null 2>&1 || die "$ECHO_DIR não é um clone git: o upgrade usa git."
+  if [ -n "$(git -C "$ECHO_DIR" status --porcelain --untracked-files=no)" ]; then
+    die "há alterações locais em arquivos versionados. Guarde ou descarte antes do upgrade (git status)."
+  fi
+
+  git -C "$ECHO_DIR" fetch --tags --quiet || die "git fetch falhou: sem acesso ao repositório?"
+  local ref_alvo versao_atual versao_nova
+  if [ -n "$alvo" ]; then
+    git -C "$ECHO_DIR" rev-parse -q --verify "refs/tags/$alvo" >/dev/null || die "a tag $alvo não existe no repositório."
+    ref_alvo="refs/tags/$alvo"
+  else
+    git -C "$ECHO_DIR" symbolic-ref -q HEAD >/dev/null || die "o código está num checkout solto (sem branch). Use ./echo upgrade --to vX.Y.Z, ou volte para a sua branch com git checkout <branch> e rode ./echo upgrade de novo."
+    ref_alvo="$(git -C "$ECHO_DIR" rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)"
+    [ -n "$ref_alvo" ] || die "a branch atual não acompanha uma remota. Use ./echo upgrade --to vX.Y.Z."
+  fi
+  versao_atual="$ECHO_VERSION"
+  versao_nova="$(git -C "$ECHO_DIR" show "$ref_alvo:package.json" 2>/dev/null | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)"
+  [ -n "$versao_nova" ] || die "não consegui ler a versão em $ref_alvo:package.json."
+  if [ "$(major_de "$versao_atual")" != "$(major_de "$versao_nova")" ] && [ "$force" = false ]; then
+    die "salto de versão maior ($versao_atual -> $versao_nova). Leia o CHANGELOG e confirme com --force."
+  fi
+  msg "Upgrade $versao_atual -> $versao_nova"
+
+  # O caminho de volta depende do commit de onde saímos e do backup: guarda os dois antes de mexer em qualquer coisa.
+  local sha_antigo branch_antiga volta
+  sha_antigo="$(git -C "$ECHO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+  branch_antiga="$(git -C "$ECHO_DIR" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+  ECHO_BACKUP_DEST=""
+  if [ "$backup" = true ]; then
+    cmd_backup
+    msg "Backup do upgrade: $ECHO_BACKUP_DEST"
+  else
+    aviso "--no-backup: sem backup antes de mexer no banco."
+  fi
+  volta="para voltar ao código antigo: git checkout ${sha_antigo:-<commit anterior>} && ./install.sh (reconstrói as imagens dele)"
+  if [ -n "$branch_antiga" ]; then volta="$volta; o checkout fica solto: para tentar o upgrade de novo depois, git checkout $branch_antiga && ./echo upgrade"; fi
+  if [ -n "$ECHO_BACKUP_DEST" ]; then volta="$volta; se o banco já migrou, ./echo restore $ECHO_BACKUP_DEST"; fi
+
+  if [ -n "$alvo" ]; then
+    git -C "$ECHO_DIR" checkout --quiet "$alvo" || die "git checkout $alvo falhou."
+  else
+    git -C "$ECHO_DIR" pull --ff-only --quiet || die "git pull --ff-only falhou (a branch divergiu da remota)."
+  fi
+  ECHO_VERSION="$(ler_versao)"
+  export ECHO_VERSION
+  GIT_SHA="$(git -C "$ECHO_DIR" rev-parse --short HEAD)"
+  export GIT_SHA
+
+  msg "Completando o .env com as chaves novas (nunca reescreve as existentes)…"
+  local completou=true
+  if [ "$ECHO_ENV_FILE" = "$ECHO_DIR/.env" ]; then
+    bash "$ECHO_DIR/install.sh" --env-only --yes || completou=false
+  else
+    rodar_genkeys --completar "$ECHO_ENV_FILE" || completou=false
+  fi
+  [ "$completou" = true ] || die "não consegui completar o .env da versão nova. O código já está na versão nova ($ECHO_VERSION) e as imagens e os containers não mudaram: corrija o .env e rode ./install.sh, ou volte: $volta."
+
+  local parados=false
+  if [ "$(ram_mb)" -lt 4096 ]; then
+    msg "Menos de 4 GB de RAM: parando gateway, functions e qr durante o build."
+    compose stop gateway functions qr
+    parados=true
+  fi
+  local parados_aviso=""
+  if [ "$parados" = true ]; then
+    parados_aviso=" ATENÇÃO: gateway, functions e qr estão PARADOS (menos de 4 GB de RAM): o Echo está fora do ar. Para religar a versão antiga enquanto corrige a causa: docker compose --project-directory $ECHO_DIR --env-file $ECHO_ENV_FILE -p $ECHO_PROJ start gateway functions qr (o start não recria nada nem roda migração)."
+  fi
+  construir_imagens || die "o build falhou. O código já está na versão nova ($ECHO_VERSION) e as imagens ficaram misturadas (a do banco, com as migrações novas, pode já ser a nova): NÃO rode ./echo up, ele aplicaria as migrações novas com as funções e o gateway antigos. Os containers em execução não foram recriados.$parados_aviso Tente de novo com ./install.sh (reconstrói e sobe) ou volte: $volta."
+  msg "Subindo (as migrações novas rodam antes do rest)…"
+  compose up -d --wait --wait-timeout 900 || die "o stack não ficou saudável: ./echo doctor. Se uma migração nova falhou, ela não foi desfeita: $volta."
+  msg "Upgrade concluído: $ECHO_VERSION."
+
+  if [ -f "$ECHO_DIR/CHANGELOG.md" ]; then
+    printf '\nCHANGELOG %s:\n' "$ECHO_VERSION"
+    awk -v v="$ECHO_VERSION" '/^## \[/ { if (dentro) exit; if (index($0, "[" v "]")) dentro = 1 } dentro { print }' "$ECHO_DIR/CHANGELOG.md" | head -n 80
+  fi
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    "" | help | -h | --help) uso_cli; return 0 ;;
+  esac
+  shift
+  carregar
+  case "$cmd" in
+    up) cmd_up "$@" ;;
+    down) cmd_down "$@" ;;
+    restart) cmd_restart "$@" ;;
+    status) cmd_status ;;
+    logs) cmd_logs "$@" ;;
+    upgrade) cmd_upgrade "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    reset-password) cmd_reset_password "$@" ;;
+    recovery-link) cmd_recovery_link "$@" ;;
+    setup-link) cmd_setup_link ;;
+    doctor) cmd_doctor ;;
+    psql) cmd_psql "$@" ;;
+    env) cmd_env "$@" ;;
+    *) uso_erro "comando desconhecido: $cmd" ;;
+  esac
+}
+
+main "$@"
+exit $?

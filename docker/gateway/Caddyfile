@@ -1,0 +1,287 @@
+# Gateway único do Echo: o front (SPA) e a API do Supabase auto-hospedado na MESMA origem (auth, rest, realtime,
+# storage, functions) mais o serviço de QR em /qr. Dois sites com o mesmo bloco de rotas (`import rotas`):
+#
+#   PÚBLICO  {$SITE_ADDRESS::80}  o que o ECHO_SITE_ADDRESS do .env decide:
+#              :80               HTTP puro (publicado em ECHO_BIND:ECHO_HTTP_PORT);
+#              echo.exemplo.com  HTTPS automático (Let's Encrypt/ZeroSSL) com redirect 80 -> 443;
+#              localhost         HTTPS com a CA interna do Caddy (teste local).
+#            Tem os bloqueios "só no público" (abaixo) e preenche X-Echo-Client-IP com o IP real do cliente, que o
+#            GoTrue usa como chave do limite por IP (D24). Sem log de acesso.
+#   INTERNO  http://:8000         só na rede do compose, NUNCA publicado e NUNCA na rede externa do proxy: o `bind` o
+#            prende ao IP do gateway na rede do compose (e ao 127.0.0.1 do healthcheck), que o entrypoint calcula
+#            em ECHO_BIND_INTERNO (sem a variável, o :8000 escuta só no 127.0.0.1: falha fechada). É o SUPABASE_URL de funções e qr e o
+#            project_url do Vault (pg_net). Apaga X-Echo-Client-IP (chamada de servidor não entra no limite por IP) e
+#            tem log de acesso com filtro (sem o healthcheck do compose): o `apikey` das funções e do qr é a SERVICE_ROLE_KEY e o Caddy só mascara
+#            Authorization/Cookie sozinho (D44). O mesmo filtro vale para os erros de proxy (logger padrão, no bloco
+#            global): são o outro caminho por onde headers e URI crua iriam para o log.
+#
+# Upstreams sempre QUALIFICADOS pela rede interna (`auth.{$ECHO_REDE_INTERNA}`, não `auth`): com --proxy-network o
+# gateway está em duas redes e o DNS do Docker responde o nome curto pela rede que ordena primeiro; um vizinho da rede do
+# proxy com apelido `auth`, `rest`, `functions`… receberia senhas, JWTs e a service role. A qualificação evita essa
+# colisão ACIDENTAL. Ela NÃO protege contra um container hostil da rede do proxy com o apelido literal `auth.<rede>`
+# (o DNS do Docker casa o nome inteiro primeiro; medido): a rede do proxy tem de ter só containers de confiança.
+# O entrypoint exige a variável.
+#
+# O entrypoint (entrypoint.sh) valida o ambiente, escreve /srv/config.js e, só com ECHO_BEHIND_PROXY=true, o arquivo
+# /etc/caddy/gerado/servers-proxy.caddy (trusted_proxies). Fora desse modo o Caddy não confia em nenhum X-Forwarded-For.
+(filtro_log) {
+	format filter {
+		wrap json
+		fields {
+			request>headers>Apikey delete
+			request>headers>X-Qr-Secret delete
+			request>uri query {
+				replace access_token REDACTED
+				replace apikey REDACTED
+				# URL assinada do Storage (/object/sign/…?token=<JWT>, que o qr e as funções buscam por aqui) e links de e-mail
+				replace token REDACTED
+			}
+		}
+	}
+}
+
+{
+	admin off
+	# Logger padrão (os erros de proxy, http.log.error.*, de TODOS os sites, inclusive o público, que não tem log de
+	# acesso): sem este filtro um 502 com upstream reiniciando imprimia a SERVICE_ROLE_KEY (Apikey), o X-Qr-Secret e a
+	# URI crua (?access_token=). O mesmo filtro do log de acesso do :8000; continua em stdout (./echo logs gateway).
+	log default {
+		output stdout
+		import filtro_log
+	}
+	servers {
+		import /etc/caddy/gerado/servers-*.caddy
+	}
+}
+
+(cors) {
+	# Paridade com o plugin cors do Kong do self-host oficial: qualquer origem, sem credenciais.
+	# O front é same-origin e não precisa; isto atende scripts e integrações de outra origem.
+	@preflight {
+		method OPTIONS
+		header Origin *
+	}
+	handle @preflight {
+		header Access-Control-Allow-Origin "*"
+		header Access-Control-Allow-Methods "GET, HEAD, PUT, PATCH, POST, DELETE, OPTIONS"
+		header Access-Control-Allow-Headers "{http.request.header.Access-Control-Request-Headers}"
+		header Access-Control-Max-Age "3600"
+		respond 204
+	}
+	header >Access-Control-Allow-Origin "*"
+}
+
+(apikey_para_bearer) {
+	# Paridade com o $LUA_AUTH_EXPR do Kong: sem Authorization, usa a apikey como Bearer.
+	@sem_authorization {
+		not header Authorization *
+		header apikey *
+	}
+	request_header @sem_authorization Authorization "Bearer {http.request.header.apikey}"
+}
+
+(exige_apikey) {
+	# Paridade com o key-auth do Kong: /auth/v1 e /rest/v1 só com a anon ou a service_role no header apikey (ou
+	# ?apikey=). A anon é pública, então isto não é segurança: é o mesmo contrato do Supabase (401 sem chave).
+	map {http.request.header.apikey} {chave_no_header} {
+		{$ANON_KEY} sim
+		{$SERVICE_ROLE_KEY} sim
+		default nao
+	}
+	map {http.request.uri.query.apikey} {chave_na_query} {
+		{$ANON_KEY} sim
+		{$SERVICE_ROLE_KEY} sim
+		default nao
+	}
+	# Dois `vars` no mesmo matcher NÃO dão AND (medido no Caddy 2.10.2); a expressão CEL dá.
+	@sem_chave expression `{chave_no_header} == "nao" && {chave_na_query} == "nao"`
+	respond @sem_chave `{"message":"Invalid API key"}` 401
+}
+
+(cabecalhos_front) {
+	# Os mesmos do vercel.json, com duas exceções, ambas só quando a URL pública é http:// (vazias com https://):
+	#   - connect-src ganha {$ECHO_CSP_WS} (" ws://host[:porta]"), porque o 'self' não cobre ws: em todo navegador;
+	#   - img-src, media-src e connect-src ganham {$ECHO_CSP_HTTP} (" http://host[:porta]", a origem canônica do
+	#     ECHO_PUBLIC_URL): a mídia gravada leva essa base, e quem abre o painel por outro endereço do mesmo gateway
+	#     (127.0.0.1 em vez de localhost, o IP da rede local) não a teria como 'self' nem como https:.
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-QbGeh01PPqSau33J92IYVYxH719sH2z3LOj39Au76Fo='; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:{$ECHO_CSP_HTTP:}; font-src 'self'; connect-src 'self' https: wss:{$ECHO_CSP_WS:}{$ECHO_CSP_HTTP:}; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; media-src 'self' https: blob:{$ECHO_CSP_HTTP:}"
+	header X-Content-Type-Options "nosniff"
+	header X-Frame-Options "DENY"
+}
+
+(rotas) {
+	encode zstd gzip
+
+	# --- Auth (GoTrue). Abertas sem apikey, como no Kong: links de e-mail, OAuth, JWKS. ---
+	@auth_aberto path /auth/v1/verify* /auth/v1/callback* /auth/v1/authorize* /auth/v1/.well-known/*
+	handle @auth_aberto {
+		import cors
+		uri strip_prefix /auth/v1
+		reverse_proxy auth.{$ECHO_REDE_INTERNA}:9999
+	}
+	handle_path /auth/v1/* {
+		import cors
+		import exige_apikey
+		import apikey_para_bearer
+		reverse_proxy auth.{$ECHO_REDE_INTERNA}:9999
+	}
+
+	# --- REST (PostgREST). A raiz /rest/v1/ (OpenAPI do esquema inteiro) só com service_role, como no Kong. ---
+	@openapi path /rest/v1/ /rest/v1
+	handle @openapi {
+		@nao_admin not header apikey {$SERVICE_ROLE_KEY}
+		respond @nao_admin `{"message":"Forbidden"}` 403
+		import apikey_para_bearer
+		rewrite * /
+		reverse_proxy rest.{$ECHO_REDE_INTERNA}:3000
+	}
+	handle_path /rest/v1/* {
+		import cors
+		import exige_apikey
+		import apikey_para_bearer
+		header >Content-Security-Policy "default-src 'none'; media-src 'self'; style-src 'unsafe-inline'; sandbox"
+		reverse_proxy rest.{$ECHO_REDE_INTERNA}:3000
+	}
+
+	# --- Storage. Mesmo strip do Kong (/storage/v1/* -> storage:5000/*). ---
+	# Mesma origem do app: o storage-api devolve o tipo gravado (image/svg+xml, application/xhtml+xml, text/xml…) e só
+	# neutraliza text/html. Aberto pela URL crua, um desses arquivos rodaria script na origem do Echo e leria o token
+	# de sessão do localStorage. O CSP `sandbox` (origem opaca, sem script) e o nosniff valem só para o documento
+	# aberto direto: <img>, <video> e <audio> do app seguem funcionando e o `?download` (attachment) não muda.
+	# Efeito colateral: um PDF aberto pela URL crua na aba não renderiza (o botão Baixar não é afetado).
+	handle_path /storage/v1/* {
+		import cors
+		import apikey_para_bearer
+		header >Content-Security-Policy "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox"
+		header >X-Content-Type-Options "nosniff"
+		reverse_proxy storage.{$ECHO_REDE_INTERNA}:5000 {
+			# O storage monta Location do TUS e URLs assinadas com o prefixo original (REQUEST_ALLOW_X_FORWARDED_PATH)
+			header_up X-Forwarded-Prefix /storage/v1
+		}
+	}
+
+	# --- Realtime. Mesmo mapeamento do Kong oficial:
+	#   /realtime/v1/websocket  -> realtime:4000/socket/websocket   (supabase-js manda ?apikey=…&vsn=…)
+	#   /realtime/v1/api/*      -> realtime:4000/api/*              (broadcast por HTTP; o qr usa /api/broadcast)
+	#   /realtime/v1/api/tenants* e /api/openapi* bloqueados (403), como no Kong.
+	# O Realtime acha o tenant pelo 1º rótulo do Host; o gateway troca por "<tenant>.realtime".
+	@rt_bloqueado path /realtime/v1/api/tenants* /realtime/v1/api/openapi*
+	handle @rt_bloqueado {
+		respond `{"message":"Access is forbidden."}` 403
+	}
+	handle /realtime/v1/api/* {
+		import cors
+		import exige_apikey
+		import apikey_para_bearer
+		uri replace /realtime/v1/api/ /api/ 1
+		reverse_proxy realtime.{$ECHO_REDE_INTERNA}:4000 {
+			header_up Host {$REALTIME_TENANT}.realtime
+		}
+	}
+	handle /realtime/v1/* {
+		import cors
+		import exige_apikey
+		uri replace /realtime/v1/ /socket/ 1
+		reverse_proxy realtime.{$ECHO_REDE_INTERNA}:4000 {
+			header_up Host {$REALTIME_TENANT}.realtime
+		}
+	}
+
+	# --- Edge functions. Sem key-auth, como no Kong: webhooks da Meta e do qr chegam sem apikey e cada função
+	# confere o próprio JWT (verify_jwt, no roteador) ou assinatura. O strip deixa /<função>/resto. ---
+	handle_path /functions/v1/* {
+		import cors
+		reverse_proxy functions.{$ECHO_REDE_INTERNA}:9000
+	}
+
+	# --- Serviço de QR (SSE do QR e do status sem buffer; as rotas dele são absolutas da raiz, o gateway tira /qr). ---
+	handle_path /qr/* {
+		reverse_proxy qr.{$ECHO_REDE_INTERNA}:3000 {
+			flush_interval -1
+		}
+	}
+
+	# --- Arquivos estáticos do front. Cabeçalhos iguais aos do vercel.json em TODO arquivo do front (nunca nas APIs). ---
+	# /config.js: configuração de execução escrita pelo entrypoint (muda o .env, ./echo up recria o gateway, sem rebuild).
+	handle /config.js {
+		root * /srv
+		import cabecalhos_front
+		header Content-Type "application/javascript; charset=utf-8"
+		header Cache-Control "no-store"
+		file_server
+	}
+	# /assets: imutável só quando o arquivo existe; inexistente = 404 sem cache (nunca o index.html: um chunk velho
+	# não pode "carregar" HTML como se fosse JS).
+	@asset_existe {
+		path /assets/*
+		file {
+			root /srv
+			try_files {path}
+		}
+	}
+	handle @asset_existe {
+		root * /srv
+		import cabecalhos_front
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+	handle /assets/* {
+		respond 404
+	}
+	# Template do e-mail de recuperação de senha (o GoTrue busca em http://gateway:8000/_email/recovery.html).
+	handle /_email/* {
+		root * /srv
+		import cabecalhos_front
+		file_server
+	}
+	# SPA.
+	handle {
+		root * /srv
+		import cabecalhos_front
+		header Cache-Control "public, max-age=0, must-revalidate"
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+{$SITE_ADDRESS::80} {
+	# O que o cliente mandar neste cabeçalho é sobrescrito: o GoTrue limita por IP pelo valor que o Caddy calcula.
+	request_header X-Echo-Client-IP {client_ip}
+
+	# Só no site público (o navegador não usa; echo-admin, funções e `./echo` usam o :8000):
+	# 1. API de administração do GoTrue.
+	@auth_admin path /auth/v1/admin /auth/v1/admin/*
+	handle @auth_admin {
+		respond 404
+	}
+	# 2. Todo subcaminho do webhook (D16): a função roteia por includes('/qr-'), então bloquear só …/qr-* era
+	#    contornável com …/a/qr-message. A raiz exata (a única URL da Meta) segue, com ou sem query.
+	@webhook_sub path /functions/v1/whatsapp-webhook/*
+	handle @webhook_sub {
+		respond 404
+	}
+	# 3. Versão, commit e filas do qr (o ./echo status e a edge qr-service-health usam o interno).
+	@qr_health path /qr/health /qr/health/*
+	handle @qr_health {
+		respond 404
+	}
+
+	import rotas
+}
+
+http://:8000 {
+	bind {$ECHO_BIND_INTERNO:127.0.0.1}
+	request_header -X-Echo-Client-IP
+	# O healthcheck do compose (wget no /config.js a cada 2 s, de dentro do container) não entra no log de acesso: sem isto
+	# ele era quase todo o `./echo logs gateway` e empurrava para fora o que importa.
+	@healthcheck {
+		path /config.js
+		remote_ip 127.0.0.1
+	}
+	log_skip @healthcheck
+	log {
+		output stdout
+		import filtro_log
+	}
+	import rotas
+}

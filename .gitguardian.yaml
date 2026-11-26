@@ -1,0 +1,9 @@
+version: 2
+
+# Senhas de teste e dados de exemplo ficam em arquivos de teste; nada aqui é credencial real.
+secret:
+  ignored_paths:
+    - "**/*.test.ts"
+    - "**/*.test.tsx"
+    - "**/*.test.mjs"
+    - "tests/**"

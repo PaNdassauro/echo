@@ -1,0 +1,8 @@
+# Modo domínio (`./install.sh --domain echo.exemplo.com`): além da 80 do docker-compose.yml, o gateway publica a 443
+# em TCP (HTTPS/HTTP2) e em UDP (HTTP/3). O Caddy emite e renova o certificado e redireciona 80 -> 443.
+# Entra pelo COMPOSE_FILE do .env; ECHO_HTTPS_PORT só existe (e só é lida) neste modo.
+services:
+  gateway:
+    ports:
+      - "${ECHO_BIND:?rode ./install.sh (ECHO_BIND ausente)}:${ECHO_HTTPS_PORT:?rode ./install.sh (ECHO_HTTPS_PORT ausente)}:443/tcp"
+      - "${ECHO_BIND}:${ECHO_HTTPS_PORT}:443/udp"

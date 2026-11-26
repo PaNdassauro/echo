@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#18181b" />
+  <script>
+    // Anti-flash: aplica o tema salvo antes do primeiro paint (as paletas vivem
+    // em CSS via [data-app-theme]). Mantido em sincronia com useLocalTheme.ts.
+    // Tema personalizado: o CSS derivado vem pronto do snapshot de boot
+    // (echo_theme_custom_boot), porque este script não importa módulos.
+    (function () {
+      try {
+        var root = document.documentElement;
+        var preset = localStorage.getItem("echo_theme_preset_last") || "echo";
+        var custom = null;
+        if (preset === "custom") {
+          try { custom = JSON.parse(localStorage.getItem("echo_theme_custom_boot") || "null"); } catch (e) { custom = null; }
+          if (!custom || typeof custom.css !== "string") { custom = null; preset = "echo"; }
+        }
+        root.dataset.appTheme = preset;
+        // Mesmos presets do DARK_PRESETS de useLocalTheme.ts.
+        var DARK_THEMES = { midnight: 1, dracula: 1, nord: 1, breu: 1 };
+        if (DARK_THEMES[preset] || (custom && custom.dark === true)) {
+          root.classList.add("dark");
+        }
+        if (custom) {
+          var style = document.createElement("style");
+          style.id = "echo-custom-theme";
+          style.textContent = custom.css;
+          document.head.appendChild(style);
+        }
+        // Barra do navegador/PWA acompanha o fundo desde o primeiro paint
+        // (valores de --background de cada preset em src/index.css).
+        var THEME_BG = {
+          echo: "hsl(0 0% 100%)",
+          whatsapp: "hsl(36 28% 94%)",
+          midnight: "hsl(200 20% 8%)",
+          dracula: "hsl(231 15% 18%)",
+          barbie: "hsl(340 100% 97%)",
+          lavanda: "hsl(252 45% 96%)",
+          nord: "hsl(220 16% 22%)",
+          breu: "hsl(0 0% 0%)"
+        };
+        var color = custom && typeof custom.themeColor === "string" ? custom.themeColor : THEME_BG[preset];
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta && color) meta.setAttribute("content", color);
+      } catch (e) { /* localStorage indisponível — segue o tema padrão */ }
+    })();
+  </script>
+  <title>Echo</title>
+  <link rel="icon" type="image/png" href="/echo-icon.png" />
+  <link rel="apple-touch-icon" href="/echo-icon.png" />
+  <meta name="description"
+    content="Echo: caixa de entrada de WhatsApp para equipes, com atribuição, automações, disparos e API." />
+  <meta name="author" content="Echo" />
+
+  <meta property="og:title" content="Echo" />
+  <meta property="og:description"
+    content="Caixa de entrada de WhatsApp para equipes, com atribuição, automações, disparos e API." />
+  <meta property="og:type" content="website" />
+
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Echo" />
+  <meta name="twitter:description"
+    content="Caixa de entrada de WhatsApp para equipes." />
+
+  <!-- Configuração de runtime (window.__ECHO_CONFIG__): escrita pelo gateway na subida. Script clássico e
+       síncrono, no head: o Vite põe o módulo da aplicação depois do conteúdo do head, então este roda ANTES
+       do módulo que cria o client do Supabase no import. Veja src/lib/runtimeConfig.ts. -->
+  <script src="/config.js"></script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

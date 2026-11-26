@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  E-mail de nova senha (Auth do Supabase, template "recovery").
+  Não vai sozinho para o projeto: aplicar com
+    node scripts/aplicar-template-recuperacao.mjs --ref <ref> --aplicar
+  O link leva o token_hash para /auth e só é consumido quando a pessoa grava a
+  senha (src/lib/passwordRecovery.ts). O prazo do texto (1 hora) é o
+  mailer_otp_exp do Auth: mudou lá, muda aqui e na tela.
+-->
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #f5f5f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f5f5f5;">
+    <tr>
+      <td align="center" style="padding: 40px 20px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 520px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);">
+          <tr>
+            <td style="background-color: #14B8A6; padding: 24px 32px;">
+              <img src="{{ .SiteURL }}/echo-logo.png" alt="Echo" style="height: 40px; width: auto;" />
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 40px 32px;">
+              <h1 style="color: #1f2937; font-size: 22px; font-weight: 600; margin: 0 0 16px 0;">
+                Criar uma nova senha
+              </h1>
+              <p style="color: #6b7280; font-size: 15px; line-height: 1.6; margin: 0 0 32px 0;">
+                Recebemos um pedido para trocar a senha da sua conta no Echo. Clique no botão abaixo para criar uma nova senha.
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin: 0 auto 32px auto;">
+                <tr>
+                  <td style="background-color: #14B8A6; border-radius: 6px;">
+                    <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery" style="display: block; padding: 14px 48px; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none;">
+                      Criar nova senha
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #9ca3af; font-size: 13px; line-height: 1.5; margin: 0 0 12px 0; text-align: center;">
+                ou copie e cole este link no navegador:
+              </p>
+              <div style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin-bottom: 32px;">
+                <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery" style="color: #6b7280; font-size: 13px; word-break: break-all; text-decoration: none;">{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=recovery</a>
+              </div>
+              <p style="color: #9ca3af; font-size: 13px; line-height: 1.5; margin: 0 0 8px 0; text-align: center;">
+                O link vale por 1 hora e funciona uma vez só. Se você pedir outro, só o mais recente funciona.
+              </p>
+              <p style="color: #9ca3af; font-size: 13px; line-height: 1.5; margin: 0; text-align: center;">
+                Se não foi você que pediu, ignore este e-mail: a senha continua a mesma.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="border-top: 1px solid #e5e7eb; padding: 24px 32px; text-align: center;">
+              <p style="color: #9ca3af; font-size: 12px; margin: 0;">Echo</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

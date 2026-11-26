@@ -1,0 +1,274 @@
+# Configuração do Supabase local (`npx supabase start`) e das edge functions.
+#
+# O banco sobe a partir de supabase/migrations (baseline + complementos) e o
+# supabase/seed.sql cria no Vault os segredos do ambiente local. Falta só criar
+# o primeiro administrador (`node scripts/bootstrap-admin.mjs`). Num projeto
+# hospedado o seed não roda: crie os quatro segredos (project_url,
+# service_role_key, qr_service_url, ai_key_secret) com vault.create_secret.
+#
+# Sem seções [inbucket]/[local_smtp] e sem `enable_signup` em [auth.email] de
+# propósito: o nome dessas chaves mudou entre a CLI 2.x e a 3.x e cada versão
+# recusa o nome da outra. O padrão das duas serve (caixa de e-mail local em
+# http://127.0.0.1:54324, cadastro por e-mail habilitado).
+
+project_id = "echo"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+# Mesmo teto do PostgREST hospedado: o código pagina com .range().
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[realtime]
+enabled = true
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+[storage]
+enabled = true
+# O bucket `attachments` aceita arquivos de até 1 GB.
+file_size_limit = "1GiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:8080"
+additional_redirect_urls = ["http://localhost:8080", "http://127.0.0.1:8080"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+minimum_password_length = 6
+
+[auth.email]
+double_confirm_changes = true
+enable_confirmations = false
+
+# E-mail de nova senha (src/lib/passwordRecovery.ts).
+[auth.email.template.recovery]
+subject = "Redefinir sua senha do Echo"
+content_path = "./supabase/templates/recovery.html"
+
+# Cadastro fechado por convite. O hook recusa qualquer cadastro que não tenha um
+# convite pendente em `user_invitations`, e por isso fica DESLIGADO por padrão:
+# num banco novo ainda não existe quem convide o primeiro administrador.
+#
+# O primeiro administrador sai de `node scripts/bootstrap-admin.mjs` (cria o
+# usuário confirmado, marca como super admin e cria a organização com o vínculo
+# de admin; veja docs/self-hosting.md). O admin API do Auth que o script usa não
+# passa pelo hook, então ele funciona com o hook ligado ou desligado.
+#
+# Para ligar o cadastro só por convite, depois do bootstrap:
+#   1. Troque `enabled` para true e reinicie com `npx supabase stop && npx supabase start`.
+#   2. No Supabase hospedado, o equivalente é Authentication > Hooks > "Before
+#      User Created", apontando para a função public.hook_before_user_created.
+[auth.hook.before_user_created]
+enabled = false
+uri = "pg-functions://postgres/public/hook_before_user_created"
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+
+[analytics]
+enabled = false
+
+# ---------------------------------------------------------------------------
+# Edge functions
+#
+# Função sem entrada herda verify_jwt = true. Todas estão declaradas aqui para
+# que um deploy futuro não mude a autorização sem que ninguém veja.
+#
+# verify_jwt = false: a chamada não traz o JWT de um usuário (Meta, serviço de
+# QR, cron) ou o gateway não consegue validá-lo (chave de serviço no formato
+# sb_secret_). Cada uma faz a própria autenticação no handler (assinatura,
+# segredo compartilhado ou papel do token). Veja _shared/authz.ts.
+# ---------------------------------------------------------------------------
+
+# --- Entrada (Meta e serviço de QR) ---
+
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.instagram-webhook]
+verify_jwt = false
+
+# Primeiro acesso (/setup): quem chama ainda não tem conta. O que protege é o
+# código de instalação (ECHO_SETUP_TOKEN, vazio = desligado) e o estado do banco
+# (só vale com a instalação vazia). Ver _shared/primeiro-acesso.ts.
+[functions.primeiro-acesso]
+verify_jwt = false
+
+# Volta do login do Instagram, no navegador de quem autoriza. A prova de origem
+# é o "state" assinado (organização + linha, vence em 30 minutos).
+[functions.instagram-oauth]
+verify_jwt = false
+
+# --- Chamadas por pg_cron/pg_net e pelo serviço de QR, sem JWT de usuário ---
+
+# O cron manda a service role key do Vault. Com verify_jwt = true uma rotação
+# da chave para o formato sb_secret_ viraria 401 mudo.
+[functions.send-failure-alert]
+verify_jwt = false
+
+[functions.send-web-push]
+verify_jwt = false
+
+[functions.send-disconnect-alert]
+verify_jwt = false
+
+[functions.fetch-analytics-data]
+verify_jwt = false
+
+# API pública: a autenticação é a chave de API da organização (header x-api-key).
+[functions.echo-api]
+verify_jwt = false
+
+# Os executores abaixo são servidor-a-servidor. checkInternalCaller
+# (_shared/authz.ts) aceita JWT com role=service_role SÓ porque o gateway confere
+# a assinatura aqui (jwtVerifiedByGateway): publicar alguma delas com
+# verify_jwt = false tornaria essa claim forjável.
+[functions.automation-execute]
+verify_jwt = true
+
+# Também recebe o nudge do front, com o JWT do usuário.
+[functions.broadcast-execute]
+verify_jwt = true
+
+[functions.scheduled-message-execute]
+verify_jwt = true
+
+[functions.survey-timeout-execute]
+verify_jwt = true
+
+# Só o cron (chave de serviço do Vault) chama; a função confere o papel do token.
+[functions.instagram-reprocessar]
+verify_jwt = true
+
+# Repete a entrega do aviso único que não teve ok. Só o cron chama.
+[functions.aviso-repetir]
+verify_jwt = true
+
+# --- Chamadas pelo front, com o token da sessão ---
+
+# verify_jwt = false com autenticação do usuário no próprio handler
+# (requireUser / Authorization). Fechar no gateway é possível, mas exige
+# conferir antes todos os chamadores.
+[functions.action-button-webhook]
+verify_jwt = false
+
+[functions.whatsapp-create-template]
+verify_jwt = false
+
+[functions.whatsapp-delete-template]
+verify_jwt = false
+
+[functions.whatsapp-edit-template]
+verify_jwt = false
+
+[functions.whatsapp-templates]
+verify_jwt = false
+
+[functions.whatsapp-get-flows]
+verify_jwt = false
+
+[functions.whatsapp-send]
+verify_jwt = true
+
+[functions.whatsapp-send-media]
+verify_jwt = true
+
+[functions.whatsapp-send-template]
+verify_jwt = true
+
+[functions.whatsapp-send-flow]
+verify_jwt = true
+
+[functions.whatsapp-send-contact]
+verify_jwt = true
+
+[functions.whatsapp-send-location]
+verify_jwt = true
+
+[functions.whatsapp-send-poll]
+verify_jwt = true
+
+[functions.whatsapp-poll-vote]
+verify_jwt = true
+
+[functions.whatsapp-forward]
+verify_jwt = true
+
+[functions.whatsapp-edit]
+verify_jwt = true
+
+[functions.whatsapp-delete]
+verify_jwt = true
+
+[functions.whatsapp-react]
+verify_jwt = true
+
+[functions.whatsapp-mark-read]
+verify_jwt = true
+
+[functions.whatsapp-typing-start]
+verify_jwt = true
+
+[functions.mirror-group-history]
+verify_jwt = true
+
+[functions.import-history]
+verify_jwt = true
+
+[functions.generate-insights]
+verify_jwt = true
+
+[functions.send-invitation]
+verify_jwt = true
+
+# Exige JWT: a função aceitaria `user_id` no corpo e qualquer um forjaria uma
+# "nota criada por <fulano>" e dispararia o webhook da organização. A identidade
+# sai do token.
+[functions.note-webhook]
+verify_jwt = true
+
+# Emite o webhook da organização quando a conversa é lida ou marcada como não lida.
+[functions.conversation-webhook]
+verify_jwt = true
+
+# Copiloto de respostas do atendente (flag por usuário: profiles.copiloto_enabled).
+[functions.copiloto]
+verify_jwt = true
+
+# Transcrição de áudio sob demanda (botão na bolha). Grava messages.metadata.leitura.
+[functions.transcrever-audio]
+verify_jwt = true
+
+# Painel /ops: proxy autenticado do /session/health do serviço de QR.
+[functions.qr-service-health]
+verify_jwt = true
+
+# Configurações > Números pede o link de conexão do Instagram (só admin).
+[functions.instagram-conexao]
+verify_jwt = true
+
+# Pop-up de feedback: envia e-mail para a equipe junto do webhook de feedback.
+[functions.send-feedback-email]
+verify_jwt = true

@@ -1,0 +1,411 @@
+# Echo auto-hospedado: o stack inteiro. Um `./install.sh` gera o .env e sobe isto; sem conta, CLI nem projeto Supabase.
+#
+#   docker compose up -d --build --wait        (o ./echo faz o mesmo com o .env e o COMPOSE_FILE certos)
+#
+# Ordem de subida (depends_on):
+#   db ─► db-init ─┬─► auth ─────┐
+#                  ├─► storage ──┼─► migrate ─► rest ─► gateway ─► qr
+#                  └─► realtime ─┘                 (o gateway também espera auth, storage e realtime)
+#   functions: sem dependência (sobe em paralelo; as funções chegam ao banco pelo gateway).
+#
+# Regras deste arquivo:
+#   - Nenhum `container_name` (dois stacks na mesma máquina não colidem) e nenhum bind mount (scripts, migrações,
+#     Caddyfile e front vão DENTRO das imagens). Só o gateway publica porta; a 8000 dele nunca é publicada.
+#   - As imagens do Echo são construídas aqui e levam o nome do projeto (${COMPOSE_PROJECT_NAME}-<x>:local).
+#   - Variável obrigatória = `${VAR:?rode ./install.sh (VAR ausente)}`: sem ela o compose recusa subir. Nos segredos que
+#     não se trocam (senhas, JWT, Vault, Realtime) a mensagem manda restaurar o .env do backup. A guarda de
+#     segredos (docker/db/preflight.sh) recusa ainda valor de exemplo.
+#   - Arquivos que entram no stack: o COMPOSE_FILE do .env (docker/compose/dominio.yml no modo domínio,
+#     docker/compose/proxy-rede.yml com --proxy-network, docker-compose.override.yml do usuário).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+# Segredos que a guarda do db-init confere (todos os ⚙ da seção 3.2, mais o código de setup).
+x-segredos: &segredos
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  JWT_SECRET: ${JWT_SECRET:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  ANON_KEY: ${ANON_KEY:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  VAULT_ROOT_KEY: ${VAULT_ROOT_KEY:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  AI_KEY_SECRET: ${AI_KEY_SECRET:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  REALTIME_SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  REALTIME_DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  REALTIME_RELEASE_COOKIE: ${REALTIME_RELEASE_COOKIE:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  QR_WEBHOOK_SECRET: ${QR_WEBHOOK_SECRET:?rode ./install.sh (QR_WEBHOOK_SECRET ausente)}
+  WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:?rode ./install.sh (WHATSAPP_VERIFY_TOKEN ausente)}
+  INSTAGRAM_OAUTH_STATE_SECRET: ${INSTAGRAM_OAUTH_STATE_SECRET:?rode ./install.sh (INSTAGRAM_OAUTH_STATE_SECRET ausente)}
+  ZAPO_DB_PASSWORD: ${ZAPO_DB_PASSWORD:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+  ECHO_SETUP_TOKEN: ${ECHO_SETUP_TOKEN:-}
+
+services:
+  db:
+    build:
+      context: .
+      dockerfile: docker/db/Dockerfile
+      args:
+        ECHO_VERSION: ${ECHO_VERSION:-dev}
+    image: ${COMPOSE_PROJECT_NAME:?rode ./install.sh (COMPOSE_PROJECT_NAME ausente)}-db:local
+    restart: unless-stopped
+    logging: *logging
+    # O guarda de segredos roda ANTES do entrypoint da imagem: sem ele, um .env de exemplo criaria o volume do banco
+    # com a senha de exemplo (e depois ninguém troca a senha sem apagar o volume). Os dois getkey_script apontam para
+    # o arquivo executável da imagem: a chave-raiz do Vault vem do .env, não de um arquivo gerado no container.
+    entrypoint: ["sh", "-c", "sh /echo/preflight.sh db && exec docker-entrypoint.sh \"$$@\"", "--"]
+    command:
+      - postgres
+      - -D
+      - /etc/postgresql
+      - -c
+      - vault.getkey_script=/echo/getkey.sh
+      - -c
+      - pgsodium.getkey_script=/echo/getkey.sh
+      - -c
+      - log_min_messages=fatal
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+      POSTGRES_HOST: /var/run/postgresql
+      VAULT_ROOT_KEY: ${VAULT_ROOT_KEY:?restaure o .env (backups/*/.env); numa instalação nova, ./install.sh}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
+
+  db-init:
+    image: ${COMPOSE_PROJECT_NAME}-db:local
+    pull_policy: never
+    restart: "no"
+    logging: *logging
+    depends_on:
+      db: { condition: service_healthy }
+    entrypoint: ["sh", "-c", "sh /echo/preflight.sh && sh /echo/db-init.sh"]
+    environment: *segredos
+
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.198.0
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${ECHO_PUBLIC_URL:?rode ./install.sh (ECHO_PUBLIC_URL ausente)}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${ECHO_PUBLIC_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ECHO_PUBLIC_URL},${ECHO_PUBLIC_URL}/**
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: ${ECHO_PUBLIC_URL}/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      # Autoconfirm sempre: sem SMTP o GoTrue "envia" para o vazio e ninguém confirmaria (D11).
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_MAILER_OTP_EXP: 3600
+      GOTRUE_PASSWORD_MIN_LENGTH: 8
+      GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
+      GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: 10
+      # Sem este cabeçalho o GoTrue v2.198.0 não limita nada por IP. O gateway público o preenche com o IP real
+      # ({client_ip}); o interno (:8000) o apaga (D24).
+      GOTRUE_RATE_LIMIT_HEADER: X-Echo-Client-IP
+      # E-mail opcional (só SMTP; o GoTrue não fala Resend). Links = API_EXTERNAL_URL + /auth/v1/verify.
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Echo}
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      # Template e assunto de "esqueci a senha" em pt-BR (o gateway serve o HTML em /_email/).
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://gateway:8000/_email/recovery.html
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: Redefinir sua senha do Echo
+      # Cadastro só por convite: public.hook_before_user_created (nasce no migrate; o GoTrue só a chama no signup).
+      GOTRUE_HOOK_BEFORE_USER_CREATED_ENABLED: "true"
+      GOTRUE_HOOK_BEFORE_USER_CREATED_URI: pg-functions://postgres/public/hook_before_user_created
+
+  storage:
+    image: public.ecr.aws/supabase/storage-api:v1.98.5
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+    healthcheck:
+      # 127.0.0.1 e não localhost: localhost cai no ::1 e o storage escuta só em IPv4.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      # SEM STORAGE_PUBLIC_URL (D6): o Location do TUS sai do Host + X-Forwarded-Prefix, então vale para quem chega
+      # pelo endereço público e para o qr, que chega por http://gateway:8000.
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      # O bucket attachments aceita até 1 GiB; o limite global precisa permitir.
+      FILE_SIZE_LIMIT: 1073741824
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      GLOBAL_S3_BUCKET: stub
+      TENANT_ID: stub
+      REGION: local
+    volumes:
+      - storage-data:/var/lib/storage
+
+  realtime:
+    image: public.ecr.aws/supabase/realtime:v2.174.5
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      db-init: { condition: service_completed_successfully }
+    # Saúde do TENANT (não só do processo): só responde 200 depois do seed criar o tenant e conectar no banco.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sSf -o /dev/null -H \"Authorization: Bearer $${ANON_KEY}\" http://127.0.0.1:4000/api/tenants/$${SELF_HOST_TENANT_NAME}/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      # O Realtime guarda os tenants em _realtime (criado pelo db-init).
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
+      RELEASE_COOKIE: ${REALTIME_RELEASE_COOKIE}
+      # Nó único: distribuição Erlang em IPv4, gen_rpc só em loopback, sem descoberta de cluster.
+      ERL_AFLAGS: -proto_dist inet_tcp
+      ECTO_IPV6: "false"
+      GEN_RPC_SOCKET_IP: 127.0.0.1
+      CLUSTER_STRATEGIES: ""
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      # O seed cria/recria o tenant a cada subida com DB_* e API_JWT_SECRET deste ambiente.
+      SEED_SELF_HOST: "true"
+      # O tenant é o 1º rótulo do Host; o gateway manda Host: echo.realtime. Fixo nos dois lados.
+      SELF_HOST_TENANT_NAME: echo
+      RUN_JANITOR: "true"
+      DISABLE_HEALTHCHECK_LOGGING: "true"
+
+  migrate:
+    image: ${COMPOSE_PROJECT_NAME}-db:local
+    pull_policy: never
+    restart: "no"
+    logging: *logging
+    depends_on:
+      auth: { condition: service_healthy }
+      storage: { condition: service_healthy }
+      realtime: { condition: service_healthy }
+    entrypoint: ["sh", "/echo/migrate.sh"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PROJECT_URL: http://gateway:8000
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      QR_SERVICE_URL: http://qr:3000
+      AI_KEY_SECRET: ${AI_KEY_SECRET}
+
+  rest:
+    image: public.ecr.aws/supabase/postgrest:v14.3
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    # `postgrest --ready` consulta o admin server (PGRST_ADMIN_SERVER_PORT).
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_ADMIN_SERVER_PORT: 3001
+      # Sem isto o `postgrest --ready` recusa: "cannot be used when server-host is configured as "!4"" (medido).
+      PGRST_ADMIN_SERVER_HOST: localhost
+
+  functions:
+    build:
+      context: .
+      dockerfile: docker/functions/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}-functions:local
+    restart: unless-stopped
+    logging: *logging
+    # Medido (prova C): 242 descritores depois de 3000 requisições com C=50; a folga evita "Too many open files".
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    # 503 quando alguma função falhou na carga: o `up --wait` falha e o nome da função aparece no log.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/_health"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    environment:
+      # Endereço INTERNO: supabase-js usa /rest/v1, /auth/v1, /storage/v1 e /functions/v1 do gateway (regra 2.5).
+      SUPABASE_URL: http://gateway:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      # Só o roteador lê (verify_jwt); ele a apaga do env antes de carregar as funções.
+      JWT_SECRET: ${JWT_SECRET}
+      ECHO_PUBLIC_URL: ${ECHO_PUBLIC_URL}
+      SITE_URL: ${ECHO_PUBLIC_URL}
+      QR_SERVICE_URL: http://qr:3000
+      QR_WEBHOOK_SECRET: ${QR_WEBHOOK_SECRET}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_APP_SECRET_ENFORCE: ${WHATSAPP_APP_SECRET_ENFORCE:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
+      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      FAILURE_ALERT_EMAILS: ${FAILURE_ALERT_EMAILS:-}
+      FEEDBACK_EMAILS: ${FEEDBACK_EMAILS:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID:-}
+      INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET:-}
+      INSTAGRAM_VERIFY_TOKEN: ${INSTAGRAM_VERIFY_TOKEN:-}
+      INSTAGRAM_OAUTH_STATE_SECRET: ${INSTAGRAM_OAUTH_STATE_SECRET}
+      INSTAGRAM_PAGINA_RETORNO: ${INSTAGRAM_PAGINA_RETORNO:-}
+      INSTAGRAM_GRAPH_VERSION: ${INSTAGRAM_GRAPH_VERSION:-}
+      INSTAGRAM_WEBHOOK_REGISTRAR_INVALIDOS: ${INSTAGRAM_WEBHOOK_REGISTRAR_INVALIDOS:-}
+      EDGE_INTERNAL_AUTH_ENFORCE: ${EDGE_INTERNAL_AUTH_ENFORCE:-}
+      EDGE_INTERNAL_SECRET_KEYS: ${EDGE_INTERNAL_SECRET_KEYS:-}
+      MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-}
+      ECHO_SETUP_TOKEN: ${ECHO_SETUP_TOKEN:-}
+      FN_REQUEST_TIMEOUT_MS: ${FN_REQUEST_TIMEOUT_MS:-}
+      ECHO_OUTBOUND_ALLOW_HOSTS: ${ECHO_OUTBOUND_ALLOW_HOSTS:-}
+      # Sem imgproxy (D25): a edge não pede a miniatura render/image para o thumbhash.
+      ECHO_IMAGE_TRANSFORM: "false"
+
+  qr:
+    build:
+      context: qr-service
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${ECHO_VERSION:-dev}
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: ${COMPOSE_PROJECT_NAME}-qr:local
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rest: { condition: service_healthy }
+      auth: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    environment:
+      PORT: "3000"
+      SUPABASE_URL: http://gateway:8000
+      ECHO_PUBLIC_URL: ${ECHO_PUBLIC_URL}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      WEBHOOK_URL: http://gateway:8000/functions/v1/whatsapp-webhook
+      QR_WEBHOOK_SECRET: ${QR_WEBHOOK_SECRET}
+      ALLOWED_ORIGINS: ${ECHO_PUBLIC_URL}
+      ZAPO_PG_URL: postgres://zapo:${ZAPO_DB_PASSWORD}@db:5432/zapo
+      ZAPO_PG_TABLE_PREFIX: wa_zapo_
+      MAX_MEDIA_BYTES: ${MAX_MEDIA_BYTES:-}
+    volumes:
+      - qr-sessions:/app/sessions
+
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/gateway/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}-gateway:local
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      auth: { condition: service_healthy }
+      rest: { condition: service_healthy }
+      storage: { condition: service_healthy }
+      realtime: { condition: service_healthy }
+    # Pelo listener interno: vale com ou sem domínio. 127.0.0.1 e não localhost (cai no ::1).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8000/config.js"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "${ECHO_BIND:?rode ./install.sh (ECHO_BIND ausente)}:${ECHO_HTTP_PORT:?rode ./install.sh (ECHO_HTTP_PORT ausente)}:80"
+    environment:
+      SITE_ADDRESS: ${ECHO_SITE_ADDRESS:?rode ./install.sh (ECHO_SITE_ADDRESS ausente)}
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      REALTIME_TENANT: echo
+      ECHO_PUBLIC_URL: ${ECHO_PUBLIC_URL}
+      ECHO_BEHIND_PROXY: ${ECHO_BEHIND_PROXY:-false}
+      # Os upstreams do Caddyfile são `<serviço>.<rede>`: com --proxy-network o nome curto poderia resolver para um vizinho
+      # da rede do proxy. É o nome fixado em `networks.default` abaixo.
+      ECHO_REDE_INTERNA: ${COMPOSE_PROJECT_NAME:?rode ./install.sh (COMPOSE_PROJECT_NAME ausente)}_default
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      FEEDBACK_WEBHOOK_URL: ${FEEDBACK_WEBHOOK_URL:-}
+      # Só para calcular as flags do /config.js (e-mail, recuperação de senha, feedback).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      FEEDBACK_EMAILS: ${FEEDBACK_EMAILS:-}
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+# Nome da rede padrão fixado (o mesmo que o Compose daria): o gateway qualifica os upstreams com ele (ECHO_REDE_INTERNA)
+# e não pode depender da normalização do nome do projeto.
+networks:
+  default:
+    name: ${COMPOSE_PROJECT_NAME:?rode ./install.sh (COMPOSE_PROJECT_NAME ausente)}_default
+
+volumes:
+  db-data:
+  storage-data:
+  qr-sessions:
+  caddy-data:
+  caddy-config:

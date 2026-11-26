@@ -1,0 +1,65 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependências e build
+node_modules
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+
+# Serviço de QR: credenciais das sessões do WhatsApp e saída de build (o qr-service/.gitignore repete)
+/qr-service/sessions/
+/qr-service/dist/
+
+# Editor
+.vscode/
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Ambiente e segredos (só os modelos .env.example e .env.development.example são versionados)
+.env
+.env.*
+!.env.example
+!.env.development.example
+# Cópias que o gen-keys/restore fazem do .env antes de acrescentar ou repor chaves
+.env.bak.*
+# Escape do usuário para variáveis avançadas do compose (o install.sh cria um arquivo só com comentários)
+docker-compose.override.yml
+private.pem
+public.pem
+
+# Lock do Deno que `deno check`/`deno test` geram na raiz (os scripts usam --no-config e não leem)
+deno.lock
+!docker/functions/deno.lock
+
+# Supabase local (link do CLI, branches, estado do container)
+supabase/.temp/
+supabase/.branches/
+
+# Configuração local de agentes e notas pessoais
+.claude/
+tasks/
+
+# Saída dos scripts operacionais: listas de grupos, checkpoints de execução e
+# relatórios têm nome e telefone de contatos. Ficam fora do repositório.
+backups/
+*.csv
+*.state.json
+
+# Planilha, PDF, vCard e SQL de rascunho largados na raiz
+/*.xlsx
+/*.pdf
+/*.vcf
+/*.sql

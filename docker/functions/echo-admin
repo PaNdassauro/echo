@@ -1,0 +1,5 @@
+#!/bin/sh
+# CLI de administração (./echo reset-password | recovery-link | setup-status). Código em echo-admin.ts.
+exec deno run --cached-only --config /app/docker/functions/deno.json \
+  --allow-net --allow-env --allow-read=/app,/deno-dir \
+  /app/docker/functions/echo-admin.ts "$@"
