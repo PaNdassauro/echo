@@ -21,6 +21,11 @@ and the QR service, in `qr-service/package.json`. Each entry is named after the 
   `music-metadata`: the QR service packages that keep open alerts), `xlsx`, `zod` 3.x, and the major versions of
   React, Vite, Tailwind, ESLint, react-router, Express and TypeScript. What remains is listed in the README, "Known limitations".
 
+### Fixed
+
+- Creating a group (or joining one by link) no longer shows "houve um erro ao salvar a conversa" when the QR service had already created the
+  conversation of the group: the existing conversation is used and opened.
+
 At a release the title of this section becomes `[X.Y.Z] - <date>`, together with the version in `package.json` (the
 `./echo upgrade` command prints the section whose title carries the version it just installed).
 

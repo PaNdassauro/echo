@@ -33,7 +33,7 @@ import { User, Users, UserPlus, X, Loader2, Camera, Settings2, ChevronDown, LogI
 import { useToast } from "@/hooks/use-toast";
 import { toUserMessage } from "@/lib/userFacingError";
 import { extractInviteCode, inviteErrorMessage, INVALID_INVITE_HINT } from "@/lib/groupInvite";
-import { supabase } from "@/integrations/supabase/client";
+import { garantirConversaDoGrupo } from "@/lib/groupConversation";
 import { qrFetch } from "@/lib/qrService";
 import ContactSelectList, { type SelectableContact } from "@/components/contacts/ContactSelectList";
 import OwnLinesSelectList, { type SelectableLine } from "@/components/contacts/OwnLinesSelectList";
@@ -245,23 +245,8 @@ const CreateGroupDialog = ({
         setParticipants(participants.filter((p) => p.phone !== phone));
     };
 
-    // Cria a conversa no Supabase para o grupo aparecer na lista
-    const insertGroupConversation = async (groupJid: string, name: string) => {
-        const { data, error } = await supabase
-            .from("conversations")
-            .insert({
-                phone_number_id: phoneNumberId,
-                contact_name: name,
-                contact_phone: groupJid, // Use groupJid as the "phone" for routing
-                whatsapp_id: groupJid, // Use groupJid as the whatsapp_id
-                is_group: true,
-                group_jid: groupJid,
-                status: "active",
-            })
-            .select("id")
-            .single();
-        return { error, conversationId: data?.id };
-    };
+    // Cria (ou acha) a conversa do grupo para ele aparecer na lista: o webhook do serviço de QR pode tê-la criado antes.
+    const insertGroupConversation = (groupJid: string, name: string) => garantirConversaDoGrupo(phoneNumberId, groupJid, name);
 
     const handleCreate = async () => {
         if (!groupName.trim()) {
