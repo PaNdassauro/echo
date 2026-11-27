@@ -137,7 +137,7 @@ the gateway. **Supabase Cloud setup:** the list below.
 - **`npm audit` still reports vulnerabilities**: `xlsx`, `zod` 3.x (fixed only in Zod 4; the app uses it on responses from its own backend) and
   `react-router` 6 in the app, development tooling (`vite`, `vitest`, `tinypool`, `esbuild`), and in the QR service `link-preview-js` (no fix inside the
   range Baileys accepts; `baileys` is listed only because it depends on it), `music-metadata` (a fix exists inside its range, but it is a direct dependency
-  of Baileys) and `sharp` (fixed only in 0.35, also used by Baileys). The Baileys-related ones were left unchanged on purpose. See the README (Known
+  of Baileys). Those two were left unchanged on purpose; `sharp`, also used by Baileys, was updated to 0.35 after a manual check. See the README (Known
   limitations). Do not run `npm run dev` or the Vitest UI server on a public host.
 - Logs of the edge functions can contain message text. Restrict access to your Supabase project logs, or to `./echo logs`
   and the Docker logs of the host, accordingly. Redact keys and customer phone numbers before pasting a log anywhere.

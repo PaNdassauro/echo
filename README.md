@@ -203,11 +203,11 @@ pg_net. The functions integrate with Meta and the QR service. The front end read
   200,000-element array) is fixed only in Zod 4, and the app uses zod to validate responses from its own backend (realtime, RPC, QR service), so the worst case
   is the user's own browser tab; and `react-router` 6 (fixed only in 7.18; the app is a single-page app and builds only internal paths). The rest is
   development tooling that never runs in production (`vite`, `vitest`, `tinypool`, `esbuild`). The edge functions import `zod` 3.23.8 from the Deno
-  side, outside `npm audit`, and validate external input with it. In the QR service it reports 4 packages (the same 4 with `--omit=dev`): `link-preview-js`
+  side, outside `npm audit`, and validate external input with it. In the QR service it reports 3 packages (the same 3 with `--omit=dev`): `link-preview-js`
   has no fix inside the version range Baileys accepts, and `baileys` is listed only because it depends on it; `music-metadata` has a fix inside its range
-  (11.16.0) but is a direct dependency of Baileys; `sharp` has a fix only in 0.35 and is also used by Baileys for thumbnails and profile pictures. None of the
-  three was changed on purpose, because changing a library that Baileys loads changes how a number behaves. Everything else with a published fix was
-  updated (see the CHANGELOG). Review the output before you expose an installation.
+  (11.16.0) but is a direct dependency of Baileys. Neither was changed on purpose, because changing a library that Baileys loads changes how a number
+  behaves (`sharp`, which Baileys also uses for thumbnails and profile pictures, went to 0.35 after a manual check with a real number). Everything else
+  with a published fix was updated (see the CHANGELOG). Review the output before you expose an installation.
 
 ## Alternative: Supabase Cloud or the Supabase CLI, plus a static host
 

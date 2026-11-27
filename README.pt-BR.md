@@ -204,11 +204,11 @@ pg_net. As funções integram com a Meta e com o serviço de QR. O front lê pel
   corrigido no Zod 4, e o app usa o zod para validar respostas do próprio backend (realtime, RPC, serviço de QR), então o pior caso é a aba do próprio
   usuário; e `react-router` 6 (corrigido só na 7.18; o app é uma aplicação de página única e só monta caminhos internos). O resto é ferramenta de
   desenvolvimento que nunca roda em produção (`vite`, `vitest`, `tinypool`, `esbuild`). As edge functions importam o `zod` 3.23.8 pelo lado do Deno, fora do
-  `npm audit`, e validam entrada externa com ele. No serviço de QR são 4 pacotes (os mesmos 4 com `--omit=dev`): o `link-preview-js` não tem correção dentro
+  `npm audit`, e validam entrada externa com ele. No serviço de QR são 3 pacotes (os mesmos 3 com `--omit=dev`): o `link-preview-js` não tem correção dentro
   da faixa que o Baileys aceita, e o `baileys` só aparece na lista por depender dele; o `music-metadata` tem correção dentro da faixa (11.16.0), mas é
-  dependência direta do Baileys; o `sharp` só tem correção na 0.35 e também é usado pelo Baileys nas miniaturas e na foto de perfil. Nenhum dos três foi
-  mexido de propósito, porque trocar uma biblioteca que o Baileys carrega muda o comportamento de um número. Tudo o mais que tinha correção publicada foi
-  atualizado (veja o CHANGELOG). Revise a saída antes de expor uma instalação.
+  dependência direta do Baileys. Nenhum dos dois foi mexido de propósito, porque trocar uma biblioteca que o Baileys carrega muda o comportamento de um
+  número (o `sharp`, que o Baileys também usa nas miniaturas e na foto de perfil, foi para a 0.35 depois de uma conferência manual com um número real). Tudo
+  o mais que tinha correção publicada foi atualizado (veja o CHANGELOG). Revise a saída antes de expor uma instalação.
 
 ## Alternativa: Supabase Cloud ou a CLI do Supabase, mais um host estático
 
