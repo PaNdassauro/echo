@@ -97,6 +97,11 @@ the database image. [docs/upgrading.md](./docs/upgrading.md).
 `.env` into `backups/echo-<date>/` (treat that folder as a secret). `./echo restore <folder>` brings them back on the same machine or, after `./install.sh` there, on a new
 server, once you confirm that the source is off. [docs/backup.md](./docs/backup.md).
 
+**Uninstall:** `./echo down` only stops the stack and keeps everything. To remove the installation, disconnect the numbers on the phone (WhatsApp > Linked
+devices), run `docker compose -p echo down -v` (it deletes the volumes: database, files, WhatsApp sessions, certificates) and
+`docker rmi echo-db:local echo-gateway:local echo-functions:local echo-qr:local`, and delete the folder, which holds the `.env` and the backups.
+[docs/self-hosting.md](./docs/self-hosting.md#19-uninstall).
+
 More: [e-mail](./docs/email.md) (SMTP, Resend or none), [troubleshooting](./docs/troubleshooting.md), [architecture](./docs/architecture.md).
 
 ## What was not tested
@@ -108,7 +113,7 @@ migration, the three install modes), and some things were not:
 - **A real certificate authority** in domain mode (automatic HTTPS and `wss` were tested with the gateway's internal authority only), and a real proxy in front: the recipes in `docs/reverse-proxy.md` were not each run.
 - **SMTP over TLS with authentication** against a real provider (only plain SMTP to a local test server). Resend was not exercised either.
 - **Native Linux beyond the smoke test**: the measurements ran on WSL2. On native Linux only the CI smoke test ran (GitHub Ubuntu runner).
-- **A real WhatsApp number**: no test opens a session. Memory use with connected numbers, the Cloud API against Meta, Instagram and Web Push delivery to a browser were not exercised.
+- **A real WhatsApp number, beyond a manual check**: no automated test opens a session. One number was paired by QR code on WSL2 and exchanged text and images by hand. Memory use with connected numbers, the Cloud API against Meta, Instagram and Web Push delivery to a browser were not exercised.
 - Firefox and Safari.
 - `./echo upgrade` without `--to` against a real remote, and an upgrade whose migration fails halfway.
 

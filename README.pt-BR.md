@@ -97,6 +97,11 @@ banco. [docs/upgrading.md](./docs/upgrading.md) (em inglês).
 `backups/echo-<data>/` (trate essa pasta como segredo). `./echo restore <pasta>` traz tudo de volta na mesma máquina ou, depois de um `./install.sh` lá, num servidor novo,
 depois de você confirmar que a origem está desligada. [docs/backup.md](./docs/backup.md) (em inglês).
 
+**Desinstalar:** `./echo down` só para o stack e mantém tudo. Para remover a instalação, desconecte os números no celular (WhatsApp > Aparelhos
+conectados), rode `docker compose -p echo down -v` (apaga os volumes: banco, arquivos, sessões do WhatsApp, certificados) e
+`docker rmi echo-db:local echo-gateway:local echo-functions:local echo-qr:local`, e apague a pasta, que guarda o `.env` e os backups.
+[docs/self-hosting.md](./docs/self-hosting.md#19-uninstall) (em inglês).
+
 Mais: [e-mail](./docs/email.md) (SMTP, Resend ou nenhum), [solução de problemas](./docs/troubleshooting.md), [arquitetura](./docs/architecture.md). Os
 guias de `docs/` estão em inglês; as mensagens do `./install.sh` e do `./echo` estão em português.
 
@@ -109,7 +114,7 @@ nova, os três modos de instalação), e algumas coisas não foram:
 - **Uma autoridade certificadora de verdade** no modo domínio (o HTTPS automático e o `wss` foram testados só com a autoridade interna do gateway) e um proxy real na frente: as receitas de `docs/reverse-proxy.md` não foram executadas uma a uma.
 - **SMTP com TLS e autenticação** num provedor real (só SMTP simples contra um servidor de teste local). O Resend também não foi exercitado.
 - **Linux nativo além da fumaça**: as medições rodaram no WSL2. Em Linux nativo só a fumaça do CI rodou (runner Ubuntu do GitHub).
-- **Um número de WhatsApp de verdade**: nenhum teste abre sessão. Uso de memória com números conectados, a Cloud API contra a Meta, o Instagram e a entrega de Web Push a um navegador não foram exercitados.
+- **Um número de WhatsApp de verdade, além de uma conferência manual**: nenhum teste automático abre sessão. Um número foi pareado por QR code no WSL2 e trocou texto e imagens à mão. Uso de memória com números conectados, a Cloud API contra a Meta, o Instagram e a entrega de Web Push a um navegador não foram exercitados.
 - Firefox e Safari.
 - `./echo upgrade` sem `--to` contra um remoto de verdade, e uma atualização cuja migração falha no meio.
 

@@ -507,3 +507,34 @@ can fire a few seconds before the stack finishes starting; a failure in that fir
 [troubleshooting.md](./troubleshooting.md) lists the errors seen during the tests, with the cause and what to do. Start with
 `./echo doctor`, then `./echo logs <service> --tail 100`. Before pasting a log into an issue, check that it contains no key,
 no password and no customer phone number.
+
+## 19. Uninstall
+
+`./echo down` stops the stack and keeps everything: the volumes, the images and the `.env`. `./echo up` brings it back.
+
+To remove the installation for good:
+
+1. **Disconnect the numbers on the phone** (WhatsApp > Linked devices > the device > Log out). Removing the server does not remove the
+   linked device from the phone.
+2. **Make a backup if you may want the data back**: `./echo backup --dest /somewhere/else`. Nothing below can be undone.
+3. **Remove the containers, the network and the volumes** (database, files, WhatsApp sessions, certificates):
+
+   ```bash
+   docker compose -p echo down -v
+   ```
+
+4. **Remove the four images built on the machine**:
+
+   ```bash
+   docker rmi echo-db:local echo-gateway:local echo-functions:local echo-qr:local
+   ```
+
+5. **Delete the folder** of the repository. It holds the `.env` (the keys of the database and of the Vault) and, unless you used `--dest`,
+   the backups in `backups/`.
+
+`echo` in the commands above is the Compose project name. If you installed with another `COMPOSE_PROJECT_NAME`, use it instead (it is in the
+`.env`): `docker compose -p <name> down -v` and `docker rmi <name>-db:local <name>-gateway:local <name>-functions:local <name>-qr:local`.
+
+The third-party images (Postgres, GoTrue, PostgREST, Realtime, Storage) stay on the machine because other projects may use them;
+`docker images` lists them and `docker rmi <image>` removes one that no container uses. To check that nothing of Echo is left:
+`docker ps -a --filter label=com.docker.compose.project=echo` and `docker volume ls --filter label=com.docker.compose.project=echo` print no row.
